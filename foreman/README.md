@@ -181,6 +181,16 @@ the same command typed directly. Anything it cannot verify asks. The lead works 
 checkout, so it may only run read-only commands without asking (a redirection like `git log > x`
 or `git diff --output=x` is a write).
 
+**Auto-approve** (`--auto-approve off|worktree|network|all`, config.json `claude.autoApprove`,
+default `network`) answers prompts before they reach you when every key the call needs is in scope:
+`worktree` covers keys confined to the worktree (`Bash:rm -r`, `Bash:git reset --hard`,
+`Bash:git checkout:<target>`, worktree scripts, dev servers), `network` adds network keys
+(`Bash:net:*`, package installs and registry calls, `Bash:npx *`, `WebFetch:*`, `WebSearch:*`), and
+`all` approves every prompt. Outside paths, the shared repository, unverifiable commands
+(`Bash:exact:*`) and the lead's commands in your checkout only pass at `all`; denials never change.
+Auto-approved calls are logged on the agent's monitor as `auto-approved (<level>): ...`. See
+`ruleKeyScope` in `src/policy.ts`.
+
 "Always allow for this agent" stores every rule key the call needed, and each key is scoped so it
 never covers more than the prompt said (the prompt shows the scope: `"Always allow for this
 agent" covers: ...`):

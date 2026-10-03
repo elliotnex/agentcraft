@@ -93,3 +93,18 @@ describe('account label', () => {
     expect(loadConfig(['--home', home], {}).claude.accountLabel).toBe('Max');
   });
 });
+
+describe('auto-approve', () => {
+  it('defaults to network; --auto-approve <level>, AGENTCRAFT_AUTO_APPROVE or config.json; --no-auto-approve is off', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    expect(load([]).claude.autoApprove).toBe('network');
+    expect(load(['--auto-approve', 'worktree']).claude.autoApprove).toBe('worktree');
+    expect(load(['--no-auto-approve']).claude.autoApprove).toBe('off');
+    expect(() => load(['--auto-approve', 'everything'])).toThrow(/unknown auto-approve level "everything"/);
+    home = tempDir();
+    expect(loadConfig(['--home', home], { AGENTCRAFT_AUTO_APPROVE: 'all' }).claude.autoApprove).toBe('all');
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ claude: { autoApprove: 'off' } }));
+    expect(loadConfig(['--home', home], {}).claude.autoApprove).toBe('off');
+  });
+});

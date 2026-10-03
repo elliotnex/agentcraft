@@ -26,7 +26,7 @@ import { FOREMAN_VERSION } from '../../config.js';
 import { ClientError, type Backend, type Foreman } from '../../foreman.js';
 import { withGitSafety } from '../../gitsafety.js';
 import { agentGitIdentity } from '../../util/git.js';
-import { classifyToolUse, describeRuleKey, describeToolCall } from '../../policy.js';
+import { autoApproves, classifyToolUse, describeRuleKey, describeToolCall } from '../../policy.js';
 import type { Decision, Goal, Task } from '../../protocol.js';
 import { MERGE_OPTIONS, PERMISSION_OPTIONS } from '../../protocol.js';
 import type { TestResult } from '../../repos.js';
@@ -248,7 +248,7 @@ export class ClaudeBackend implements Backend {
       // named after its email)
       const account = this.cfg.accountLabel === undefined ? reported : this.cfg.accountLabel || undefined;
       this.authFailed = false;
-      this.fm.setStatus({ auth: 'ok', account, message: `Claude (lead ${this.cfg.leadModel}, workers ${this.cfg.workerModel})` });
+      this.fm.setStatus({ auth: 'ok', account, autoApprove: this.cfg.autoApprove, message: `Claude (lead ${this.cfg.leadModel}, workers ${this.cfg.workerModel})` });
       this.fm.log.info(`claude auth ok (${account ?? 'account hidden'})`);
       return true;
     } catch (e) {
@@ -626,6 +626,10 @@ export class ClaudeBackend implements Backend {
       if (verdict.action === 'deny') {
         this.fm.agentLog(agentId, 'error', `blocked: ${describeToolCall(toolName, input)} (${verdict.reason})`);
         return { behavior: 'deny', message: verdict.reason };
+      }
+      if (autoApproves(this.cfg.autoApprove, verdict.ruleKeys)) {
+        this.fm.agentLog(agentId, 'result', `auto-approved (${this.cfg.autoApprove}): ${describeToolCall(toolName, input)}`);
+        return { behavior: 'allow', updatedInput: input };
       }
       const prev = this.fm.agent(agentId);
       const prevState = prev ? { state: prev.state, station: prev.station, activity: prev.activity } : undefined;

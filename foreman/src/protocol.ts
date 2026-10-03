@@ -208,6 +208,9 @@ export const FeedItem = z.object({
 });
 export type FeedItem = z.infer<typeof FeedItem>;
 
+export const AutoApprove = z.enum(['off', 'worktree', 'network', 'all']);
+export type AutoApprove = z.infer<typeof AutoApprove>;
+
 export const ForemanStatus = z.object({
   version: z.string(),
   backend: BackendName,
@@ -218,6 +221,7 @@ export const ForemanStatus = z.object({
   showcase: z.boolean().optional().describe('sim: holding a static showcase state (`--showcase` or `--showcase late`)'),
   costUsd: z.number().optional().describe('claude: estimated spend of this profile (sum over all sessions, survives restarts)'),
   userName: z.string().optional().describe('the person the team works for, as the agents address them (UI: "<name> answered")'),
+  autoApprove: AutoApprove.optional().describe('claude: permission prompts the Foreman answers itself (config claude.autoApprove)'),
 });
 export type ForemanStatus = z.infer<typeof ForemanStatus>;
 

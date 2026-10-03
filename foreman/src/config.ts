@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { readJson } from './util/fsx.js';
 import type { BackendName } from './protocol.js';
 import { defaultUserName } from './user.js';
+import { AUTO_APPROVE_LEVELS, type AutoApprove } from './policy.js';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 
 export const FOREMAN_VERSION = '0.1.0';
@@ -41,6 +42,8 @@ export interface ClaudeConfig {
    * login (can contain your email), a string = that text instead, false = nothing.
    */
   accountLabel?: string | false;
+  /** permission prompts the Foreman answers itself (see AutoApprove in policy.ts) */
+  autoApprove: AutoApprove;
 }
 
 export type ShowcaseCheckpoint = 'showcase' | 'showcase-late';
@@ -144,6 +147,13 @@ function accountLabel(v: unknown): string | false | undefined {
   return String(v).trim().slice(0, 60) || false;
 }
 
+function autoApprove(v: unknown): AutoApprove {
+  if (v === undefined || v === true) return 'network';
+  if (v === false) return 'off';
+  if (typeof v === 'string' && (AUTO_APPROVE_LEVELS as readonly string[]).includes(v)) return v as AutoApprove;
+  throw new Error(`unknown auto-approve level "${String(v)}" (use ${AUTO_APPROVE_LEVELS.join(', ')})`);
+}
+
 function mergeStyle(v: unknown): 'merge' | 'squash' {
   if (v === undefined || v === 'merge') return 'merge';
   if (v === 'squash') return 'squash';
@@ -163,7 +173,7 @@ export const KNOWN_FLAGS = new Set([
   'toast-silent', 'debug', 'quiet', 'allow-browser-origins', 'repo-poll-ms', 'merge-style', 'sign-merges',
   'lead-model', 'worker-model', 'effort', 'lead-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
   'max-concurrent', 'ci', 'max-budget', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
-  'ambient', 'account-label',
+  'ambient', 'account-label', 'auto-approve',
 ]);
 
 /**
@@ -246,6 +256,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       leadReview: bool(flags['lead-review'] ?? fileClaude.leadReview, true),
       useClaudeLogin: bool(flags['use-claude-login'] ?? env.AGENTCRAFT_USE_CLAUDE_LOGIN ?? fileClaude.useClaudeLogin, false),
       accountLabel: accountLabel(flags['account-label'] ?? env.AGENTCRAFT_ACCOUNT_LABEL ?? fileClaude.accountLabel),
+      autoApprove: autoApprove(flags['auto-approve'] ?? env.AGENTCRAFT_AUTO_APPROVE ?? fileClaude.autoApprove),
     },
     sim: {
       speed: Math.max(0.05, num(flags.speed ?? env.AGENTCRAFT_SIM_SPEED ?? fileSim.speed, 1)),
@@ -298,6 +309,13 @@ usage: npm run start -- [options]
   --account-label <text>   show this as the account in the HUD instead of the login's organization
                            and plan; --no-account-label shows none (env AGENTCRAFT_ACCOUNT_LABEL,
                            config.json claude.accountLabel: text, or false to hide)
+  --auto-approve <level>   permission prompts answered for you (default network; env
+                           AGENTCRAFT_AUTO_APPROVE, config.json claude.autoApprove):
+                             off       ask about everything the policy flags
+                             worktree  allow what stays in the agent's worktree (rm -r, git reset)
+                             network   worktree + network (npm install, npx, curl, web tools)
+                             all       everything except what is always refused (git push)
+                           --no-auto-approve = off
   --model <m>              model for lead and workers (default lead: opus, workers: sonnet)
   --lead-model <m> / --worker-model <m>
   --effort low|medium|high|xhigh|max   (default medium)

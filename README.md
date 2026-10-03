@@ -159,6 +159,12 @@ AgentCraft is built to point at code you care about.
 - **Risky commands ask first.** Reads and edits inside the worktree are allowed. Anything else
   (writing outside it, network access, destructive commands) becomes an in game permission prompt
   that shows exactly what "Always allow" would cover.
+- **Auto-approve, on your terms.** By default (`network`) the Foreman answers prompts for actions
+  confined to the agent's worktree (`rm -r`, `git reset --hard`) and for network access
+  (`npm install`, `npx`, `curl`, web tools) itself; anything outside the worktree still asks. Set
+  `{"claude": {"autoApprove": "off"}}` in `~/.agentcraft/config.json` to be asked about everything,
+  `"worktree"` for worktree actions only, or `"all"` for everything except what is always refused
+  (git push). The HUD shows the level whenever it is not `off`.
 - **Clear authorship.** Agents commit as `AgentCraft <Name>`. Only the merge you approve is made as you.
 
 <br>

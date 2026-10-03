@@ -29,6 +29,7 @@ const result = (session: string, text = 'done') => msg({ type: 'result', subtype
 
 const calls: Array<{ prompt: string; cwd: string; resume?: string; env?: Record<string, string | undefined> }> = [];
 let permissionVerdict: string | undefined;
+let autoVerdict: string | undefined;
 
 function fakeQuery(h: Harness) {
   return ({ prompt, options }: { prompt: string | AsyncIterable<unknown>; options?: Options }) => {
@@ -57,7 +58,10 @@ function fakeQuery(h: Harness) {
         const cli = path.join(opts.cwd!, 'src', 'cli.ts');
         fs.writeFileSync(cli, fs.readFileSync(cli, 'utf8').replace("      case 'help':", "      case '--version':\n        io.out('pocket-notes 0.2.0');\n        return 0;\n      case 'help':"));
         yield toolResult(s, 'The file has been updated.');
-        // the CLI asks the host before a risky command
+        // the CLI asks the host before a risky command: --auto-approve worktree allows the
+        // recursive delete inside the worktree by itself, the install still needs the user
+        const auto = await opts.canUseTool!('Bash', { command: 'rm -r build' }, { signal: new AbortController().signal, toolUseID: 'w', requestId: 'r0' } as never);
+        autoVerdict = auto?.behavior ?? 'none';
         const verdict = await opts.canUseTool!('Bash', { command: 'npm install left-pad' }, { signal: new AbortController().signal, toolUseID: 'x', requestId: 'r' } as never);
         permissionVerdict = verdict?.behavior ?? 'none';
         const answer = await callTool(opts, 'ask_user', { question: 'Print just the number or "pocket-notes 0.2.0"?', options: ['Name + number (recommended)', 'Just the number'] });
@@ -109,7 +113,7 @@ let backend: ClaudeBackend;
 beforeAll(async () => {
   home = tempDir();
   repoPath = await demoRepo();
-  h = makeForeman(home, ['--backend', 'claude', '--workers', 'kit,juniper', '--repo', repoPath]);
+  h = makeForeman(home, ['--backend', 'claude', '--workers', 'kit,juniper', '--repo', repoPath, '--auto-approve', 'worktree']);
   backend = new ClaudeBackend(h.fm, h.cfg.claude, { queryFn: fakeQuery(h) as never, skipAuthCheck: true });
   await h.fm.start(backend);
 });
@@ -132,6 +136,9 @@ describe('claude backend orchestration (fake SDK)', () => {
     await until(() => fm.decisions.open().some((d) => d.kind === 'permission'));
     const perm = fm.decisions.open().find((d) => d.kind === 'permission')!;
     expect(perm.question).toContain('npm install left-pad');
+    expect(autoVerdict).toBe('allow');
+    expect(fm.decisions.list().filter((d) => d.kind === 'permission')).toHaveLength(1);
+    expect(fm.store.logTail('kit').some((e) => e.text === 'auto-approved (worktree): Bash: rm -r build')).toBe(true);
     expect(fm.agent('kit')!.state).toBe('waiting_user');
     await fm.answerDecision(perm.id, 'Deny');
     await until(() => permissionVerdict !== undefined);

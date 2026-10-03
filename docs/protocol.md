@@ -184,6 +184,7 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `showcase` | boolean | no | sim: holding a static showcase state (`--showcase` or `--showcase late`) |
 | `costUsd` | number | no | claude: estimated spend of this profile (sum over all sessions, survives restarts) |
 | `userName` | string | no | the person the team works for, as the agents address them (UI: "<name> answered") |
+| `autoApprove` | `off` \| `worktree` \| `network` \| `all` | no | claude: permission prompts the Foreman answers itself (config claude.autoApprove) |
 
 ### <a id="agentlogs"></a>AgentLogs
 
