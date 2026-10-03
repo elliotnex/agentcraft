@@ -76,3 +76,20 @@ describe('user name', () => {
     }
   });
 });
+
+describe('account label', () => {
+  it('comes from --account-label, then AGENTCRAFT_ACCOUNT_LABEL, then config.json; false or empty hides it', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    expect(load([]).claude.accountLabel).toBeUndefined();
+    expect(load(['--account-label', 'Studio']).claude.accountLabel).toBe('Studio');
+    expect(load(['--no-account-label']).claude.accountLabel).toBe(false);
+    home = tempDir();
+    expect(loadConfig(['--home', home], { AGENTCRAFT_ACCOUNT_LABEL: 'Env label' }).claude.accountLabel).toBe('Env label');
+    expect(loadConfig(['--home', home], { AGENTCRAFT_ACCOUNT_LABEL: '' }).claude.accountLabel).toBe(false);
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ claude: { accountLabel: false } }));
+    expect(loadConfig(['--home', home], {}).claude.accountLabel).toBe(false);
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ claude: { accountLabel: '  Max  ' } }));
+    expect(loadConfig(['--home', home], {}).claude.accountLabel).toBe('Max');
+  });
+});

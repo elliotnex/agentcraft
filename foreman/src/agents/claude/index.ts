@@ -241,12 +241,15 @@ export class ClaudeBackend implements Backend {
       const info = await Promise.race([q.accountInfo(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timed out after 45s')), 45_000))]);
       const ok = !!(info.email || info.organization || (info.apiKeySource && info.apiKeySource !== 'none') || (info.tokenSource && info.tokenSource !== 'none') || (info.apiProvider && info.apiProvider !== 'firstParty'));
       if (!ok) throw new Error('not logged in');
-      const account = this.cfg.useClaudeLogin
+      const reported = this.cfg.useClaudeLogin
         ? [info.organization, info.subscriptionType].filter(Boolean).join(' · ') || info.apiProvider || 'ok'
         : [api.ok ? api.source : 'API', info.organization].filter(Boolean).join(' · ');
+      // claude.accountLabel: replace or hide what the HUD shows (a personal login's organization is
+      // named after its email)
+      const account = this.cfg.accountLabel === undefined ? reported : this.cfg.accountLabel || undefined;
       this.authFailed = false;
       this.fm.setStatus({ auth: 'ok', account, message: `Claude (lead ${this.cfg.leadModel}, workers ${this.cfg.workerModel})` });
-      this.fm.log.info(`claude auth ok (${account})`);
+      this.fm.log.info(`claude auth ok (${account ?? 'account hidden'})`);
       return true;
     } catch (e) {
       this.markAuthFailed(

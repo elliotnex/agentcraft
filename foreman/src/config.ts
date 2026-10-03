@@ -36,6 +36,11 @@ export interface ClaudeConfig {
    * only: Anthropic does not allow third-party tools to offer claude.ai login (see agents/claude/auth.ts).
    */
   useClaudeLogin: boolean;
+  /**
+   * What the HUD shows as the signed-in account: unset = organization and plan as reported by the
+   * login (can contain your email), a string = that text instead, false = nothing.
+   */
+  accountLabel?: string | false;
 }
 
 export type ShowcaseCheckpoint = 'showcase' | 'showcase-late';
@@ -133,6 +138,12 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length ? v : undefined;
 }
 
+function accountLabel(v: unknown): string | false | undefined {
+  if (v === undefined || v === true) return undefined;
+  if (v === false) return false;
+  return String(v).trim().slice(0, 60) || false;
+}
+
 function mergeStyle(v: unknown): 'merge' | 'squash' {
   if (v === undefined || v === 'merge') return 'merge';
   if (v === 'squash') return 'squash';
@@ -152,7 +163,7 @@ export const KNOWN_FLAGS = new Set([
   'toast-silent', 'debug', 'quiet', 'allow-browser-origins', 'repo-poll-ms', 'merge-style', 'sign-merges',
   'lead-model', 'worker-model', 'effort', 'lead-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
   'max-concurrent', 'ci', 'max-budget', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
-  'ambient',
+  'ambient', 'account-label',
 ]);
 
 /**
@@ -234,6 +245,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       resumeOnStart: bool(flags.resume ?? fileClaude.resumeOnStart, true),
       leadReview: bool(flags['lead-review'] ?? fileClaude.leadReview, true),
       useClaudeLogin: bool(flags['use-claude-login'] ?? env.AGENTCRAFT_USE_CLAUDE_LOGIN ?? fileClaude.useClaudeLogin, false),
+      accountLabel: accountLabel(flags['account-label'] ?? env.AGENTCRAFT_ACCOUNT_LABEL ?? fileClaude.accountLabel),
     },
     sim: {
       speed: Math.max(0.05, num(flags.speed ?? env.AGENTCRAFT_SIM_SPEED ?? fileSim.speed, 1)),
@@ -283,6 +295,9 @@ usage: npm run start -- [options]
   auth: ANTHROPIC_API_KEY, or a cloud provider (CLAUDE_CODE_USE_BEDROCK / _VERTEX / _FOUNDRY)
   --use-claude-login       use your local \`claude\` CLI login instead (personal use only; env
                            AGENTCRAFT_USE_CLAUDE_LOGIN=1, config.json claude.useClaudeLogin)
+  --account-label <text>   show this as the account in the HUD instead of the login's organization
+                           and plan; --no-account-label shows none (env AGENTCRAFT_ACCOUNT_LABEL,
+                           config.json claude.accountLabel: text, or false to hide)
   --model <m>              model for lead and workers (default lead: opus, workers: sonnet)
   --lead-model <m> / --worker-model <m>
   --effort low|medium|high|xhigh|max   (default medium)

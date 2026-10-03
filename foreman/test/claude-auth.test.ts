@@ -77,4 +77,20 @@ describe('ClaudeBackend.checkAuth', () => {
     expect(await b.checkAuth()).toBe(true);
     expect(h.fm.status.account).toBe('Acme · max');
   });
+
+  it('claude.accountLabel renames or hides the account shown in the HUD', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+    home = tempDir();
+    h = makeForeman(home, ['--backend', 'claude', '--use-claude-login', '--account-label', 'My Max plan']);
+    expect(await new ClaudeBackend(h.fm, h.cfg.claude, { queryFn: fakeQuery as never }).checkAuth()).toBe(true);
+    expect(h.fm.status.account).toBe('My Max plan');
+    await h.fm.close();
+
+    h = makeForeman(home, ['--backend', 'claude', '--use-claude-login', '--no-account-label']);
+    expect(h.cfg.claude.accountLabel).toBe(false);
+    expect(await new ClaudeBackend(h.fm, h.cfg.claude, { queryFn: fakeQuery as never }).checkAuth()).toBe(true);
+    expect(h.fm.status.auth).toBe('ok');
+    expect(h.fm.status.account).toBeUndefined();
+  });
 });

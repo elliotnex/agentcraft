@@ -216,6 +216,11 @@ the first time; in an older world, rebuild it with `/agentcraft hq`.
 `-ForemanArgs '--user-name','Sam'`, `AGENTCRAFT_USER_NAME`, or `{"userName": "Sam"}` in
 `~/.agentcraft/config.json`.
 
+**The account label.** The HUD shows the signed in account's organization and plan, which for a
+personal Claude login contains your email. Rename it with `{"claude": {"accountLabel": "My studio"}}`
+in `~/.agentcraft/config.json` (or `-ForemanArgs '--account-label','My studio'`), or hide it with
+`"accountLabel": false` (`--no-account-label`).
+
 <br>
 
 ## Controls
