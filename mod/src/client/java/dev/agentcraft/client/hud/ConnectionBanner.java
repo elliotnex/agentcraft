@@ -97,7 +97,8 @@ public final class ConnectionBanner implements HudElement {
 		}
 		return switch (fs.backend()) {
 			case SIM -> fs.speed() != null && fs.speed() != 1.0 ? "sim ×" + trim(fs.speed()) : "sim";
-			case CLAUDE -> "claude";
+			// auto-approve stays visible: the Foreman is answering permission prompts for you
+			case CLAUDE -> fs.autoApprove() != null && !fs.autoApprove().equals("off") ? "claude · auto-approve " + fs.autoApprove() : "claude";
 			default -> fs.backend().wire();
 		};
 	}

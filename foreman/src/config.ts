@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { readJson } from './util/fsx.js';
 import type { BackendName } from './protocol.js';
 import { defaultUserName } from './user.js';
+import { AUTO_APPROVE_LEVELS, type AutoApprove } from './policy.js';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 
 export const FOREMAN_VERSION = '0.1.0';
@@ -36,6 +37,8 @@ export interface ClaudeConfig {
    * only: Anthropic does not allow third-party tools to offer claude.ai login (see agents/claude/auth.ts).
    */
   useClaudeLogin: boolean;
+  /** permission prompts the Foreman answers itself (see AutoApprove in policy.ts) */
+  autoApprove: AutoApprove;
 }
 
 export type ShowcaseCheckpoint = 'showcase' | 'showcase-late';
@@ -133,6 +136,13 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length ? v : undefined;
 }
 
+function autoApprove(v: unknown): AutoApprove {
+  if (v === undefined || v === true) return 'network';
+  if (v === false) return 'off';
+  if (typeof v === 'string' && (AUTO_APPROVE_LEVELS as readonly string[]).includes(v)) return v as AutoApprove;
+  throw new Error(`unknown auto-approve level "${String(v)}" (use ${AUTO_APPROVE_LEVELS.join(', ')})`);
+}
+
 function mergeStyle(v: unknown): 'merge' | 'squash' {
   if (v === undefined || v === 'merge') return 'merge';
   if (v === 'squash') return 'squash';
@@ -152,7 +162,7 @@ export const KNOWN_FLAGS = new Set([
   'toast-silent', 'debug', 'quiet', 'allow-browser-origins', 'repo-poll-ms', 'merge-style', 'sign-merges',
   'lead-model', 'worker-model', 'effort', 'lead-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
   'max-concurrent', 'ci', 'max-budget', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
-  'ambient',
+  'ambient', 'auto-approve',
 ]);
 
 /**
@@ -234,6 +244,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       resumeOnStart: bool(flags.resume ?? fileClaude.resumeOnStart, true),
       leadReview: bool(flags['lead-review'] ?? fileClaude.leadReview, true),
       useClaudeLogin: bool(flags['use-claude-login'] ?? env.AGENTCRAFT_USE_CLAUDE_LOGIN ?? fileClaude.useClaudeLogin, false),
+      autoApprove: autoApprove(flags['auto-approve'] ?? env.AGENTCRAFT_AUTO_APPROVE ?? fileClaude.autoApprove),
     },
     sim: {
       speed: Math.max(0.05, num(flags.speed ?? env.AGENTCRAFT_SIM_SPEED ?? fileSim.speed, 1)),
@@ -283,6 +294,13 @@ usage: npm run start -- [options]
   auth: ANTHROPIC_API_KEY, or a cloud provider (CLAUDE_CODE_USE_BEDROCK / _VERTEX / _FOUNDRY)
   --use-claude-login       use your local \`claude\` CLI login instead (personal use only; env
                            AGENTCRAFT_USE_CLAUDE_LOGIN=1, config.json claude.useClaudeLogin)
+  --auto-approve <level>   permission prompts answered for you (default network; env
+                           AGENTCRAFT_AUTO_APPROVE, config.json claude.autoApprove):
+                             off       ask about everything the policy flags
+                             worktree  allow what stays in the agent's worktree (rm -r, git reset)
+                             network   worktree + network (npm install, npx, curl, web tools)
+                             all       everything except what is always refused (git push)
+                           --no-auto-approve = off
   --model <m>              model for lead and workers (default lead: opus, workers: sonnet)
   --lead-model <m> / --worker-model <m>
   --effort low|medium|high|xhigh|max   (default medium)

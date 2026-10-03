@@ -40,6 +40,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GIT_REDIRECT_VARS } from './gitsafety.js';
+import { AutoApprove } from './protocol.js';
 import { isInsideOrEqual } from './util/fsx.js';
 
 export type Verdict =
@@ -1322,6 +1323,10 @@ function classifyGit(args: string[], sc: SegCtx): J {
   return merge(j, exact(sc.env, `git ${sub} changes repository state`));
 }
 
+const PM_RUN_PKG = ['exec', 'x', 'dlx', 'create', 'init', 'innit'];
+const PM_INSTALL = ['install', 'i', 'in', 'ins', 'isntall', 'add', 'ci', 'clean-install', 'install-test', 'it', 'install-ci-test', 'update', 'up', 'upgrade', 'udpate', 'uninstall', 'remove', 'rm', 'r', 'un', 'unlink', 'link', 'ln', 'dedupe', 'ddp', 'prune', 'rebuild', 'rb'];
+const PM_REGISTRY = ['view', 'v', 'info', 'show', 'search', 's', 'se', 'find', 'outdated', 'audit', 'ping', 'whoami', 'doctor', 'stars', 'repo', 'docs', 'home', 'bugs', 'sbom'];
+
 function classifyPackageManager(cmd: string, rest: string[], sc: SegCtx): J {
   const paths = pathAsks(argCandidates(rest), 'w', sc);
   const positional = rest.filter((a) => !a.startsWith('-'));
@@ -1334,21 +1339,18 @@ function classifyPackageManager(cmd: string, rest: string[], sc: SegCtx): J {
     if (sub === 'pkg' && positional.some((a) => ['set', 'delete', 'fix'].includes(a))) return merge(paths, need(`${cmd} pkg changes package.json`, `Bash:${cmd} pkg set`));
     return merge(paths, ok(`${cmd} ${sub}`.trim(), ['ls', 'list', 'll', 'la', 'why', 'explain', 'help', 'prefix', 'root', 'bin', 'get', 'query'].includes(sub)));
   }
-  const RUN_PKG = ['exec', 'x', 'dlx', 'create', 'init', 'innit'];
-  if (RUN_PKG.includes(sub)) {
+  if (PM_RUN_PKG.includes(sub)) {
     const pkg = (positional[1] ?? '').toLowerCase();
     if (!pkg || isDynamic(pkg)) return merge(paths, exact(sc.env, `${cmd} ${sub} downloads and runs a package`));
     return merge(paths, need(`${cmd} ${sub} ${pkg} downloads and runs a package`, `Bash:${cmd} ${sub} ${pkg}`));
   }
-  const INSTALL = ['install', 'i', 'in', 'ins', 'isntall', 'add', 'ci', 'clean-install', 'install-test', 'it', 'install-ci-test', 'update', 'up', 'upgrade', 'udpate', 'uninstall', 'remove', 'rm', 'r', 'un', 'unlink', 'link', 'ln', 'dedupe', 'ddp', 'prune', 'rebuild', 'rb'];
-  if (INSTALL.includes(sub)) {
+  if (PM_INSTALL.includes(sub)) {
     if (sub === 'link' || sub === 'ln') return merge(paths, exact(sc.env, `${cmd} link links packages outside the worktree`));
     return merge(paths, need(`${cmd} ${sub} downloads packages (network) and changes dependencies`, `Bash:${cmd} ${sub}`));
   }
   const ACCOUNT = ['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'access', 'team', 'org', 'token', 'profile', 'login', 'logout', 'adduser', 'hook', 'star', 'unstar'];
   if (ACCOUNT.includes(sub)) return merge(paths, exact(sc.env, `${cmd} ${sub}: changes things on the package registry`));
-  const REGISTRY = ['view', 'v', 'info', 'show', 'search', 's', 'se', 'find', 'outdated', 'audit', 'ping', 'whoami', 'doctor', 'stars', 'repo', 'docs', 'home', 'bugs', 'sbom'];
-  if (REGISTRY.includes(sub)) {
+  if (PM_REGISTRY.includes(sub)) {
     const fix = sub === 'audit' && positional.includes('fix') ? ' fix' : '';
     return merge(paths, need(`${cmd} ${sub}${fix}: network access (talks to the package registry)`, `Bash:${cmd} ${sub}${fix}`));
   }
@@ -2078,6 +2080,57 @@ export function classifyToolUse(toolName: string, input: Record<string, unknown>
 
   if (toolName.startsWith('mcp__')) return always(toolName) ?? askVerdict(`external MCP tool ${toolName}`, toolName);
   return always(toolName) ?? askVerdict(`unrecognised tool ${toolName}`, toolName);
+}
+
+// ---- auto-approve ----------------------------------------------------------------------------
+
+/**
+ * How much the Foreman approves on the user's behalf (config claude.autoApprove), instead of
+ * opening a permission decision. Denials (git push, the lead editing files, ...) never change.
+ *   off       every `ask` becomes a permission decision
+ *   worktree  actions the classifier confined to the agent's worktree (recursive deletes,
+ *             git reset --hard / clean / rebase / checkout, worktree scripts, dev servers)
+ *   network   worktree + network access (package installs and registry calls, npx, curl, web tools)
+ *   all       every `ask`: outside paths, the shared repository, unverifiable commands and the
+ *             lead's commands in the user's checkout included
+ */
+export const AUTO_APPROVE_LEVELS = AutoApprove.options;
+export type { AutoApprove };
+
+export type RuleKeyScope = 'worktree' | 'network' | 'other';
+
+const WORKTREE_KEYS = new Set(['Bash:rm -r', 'Bash:find -delete', 'Bash:git reset --hard', 'Bash:git clean', 'Bash:git rebase', 'Bash:chmod', 'Bash:attrib', 'Bash:dd', 'Bash:vite serve', 'Bash:webpack serve']);
+const NETWORK_DEV_KEYS = new Set(['Bash:go get', 'Bash:go mod', 'Bash:cargo add', 'Bash:cargo update', 'Bash:cargo search', 'Bash:cargo fetch', 'Bash:dotnet add', 'Bash:dotnet restore', 'Bash:dotnet publish']);
+
+/**
+ * What a rule key reaches. Anything not recognised is 'other', so a new kind of key asks until
+ * it is listed here.
+ */
+export function ruleKeyScope(key: string): RuleKeyScope {
+  if (/^Bash:(outside|exact|cd):/.test(key)) return 'other';
+  if (/^Web(Fetch|Search):/.test(key) || key.startsWith('Bash:net:') || key.startsWith('Bash:npx ') || NETWORK_DEV_KEYS.has(key)) return 'network';
+  if (WORKTREE_KEYS.has(key)) return 'worktree';
+  // recursive delete with another tool (rmdir, Remove-Item, ...): only keyed when inside the worktree
+  if (/^Bash:[^\s:]+ -r$/.test(key)) return 'worktree';
+  if (/^Bash:git (checkout|switch):/.test(key)) return 'worktree';
+  // a shell script inside the worktree (outside ones are Bash:outside:)
+  if (/^Bash:[^\s:]+ script:/.test(key)) return 'worktree';
+  const pm = /^Bash:(npm|pnpm|yarn|bun) (\S+)(?: (.+))?$/.exec(key);
+  if (pm) {
+    const [, , sub, arg] = pm;
+    if (sub === 'pkg' && arg === 'set') return 'worktree';
+    if (PM_INSTALL.includes(sub!) || PM_REGISTRY.includes(sub!) || (PM_RUN_PKG.includes(sub!) && arg)) return 'network';
+  }
+  return 'other';
+}
+
+const LEVEL_RANK: Record<AutoApprove, number> = { off: 0, worktree: 1, network: 2, all: 3 };
+const SCOPE_RANK: Record<RuleKeyScope, number> = { worktree: 1, network: 2, other: 3 };
+
+/** True when `level` covers every key an `ask` verdict needs. */
+export function autoApproves(level: AutoApprove, ruleKeys: string[]): boolean {
+  const rank = LEVEL_RANK[level];
+  return rank > 0 && ruleKeys.length > 0 && ruleKeys.every((k) => SCOPE_RANK[ruleKeyScope(k)] <= rank);
 }
 
 /** One-line human description of a tool call, for permission prompts and logs. */
