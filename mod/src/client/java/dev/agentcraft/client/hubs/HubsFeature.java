@@ -28,6 +28,9 @@ import org.jspecify.annotations.Nullable;
  */
 public final class HubsFeature {
 	private static @Nullable String answerOnArrival;
+	/** hub id -> project folder to connect once the new hub's Foreman is up. */
+	private static final java.util.Map<String, String> PENDING_REPOS = new java.util.concurrent.ConcurrentHashMap<>();
+	private static int tick;
 
 	private HubsFeature() {
 	}
@@ -43,7 +46,36 @@ public final class HubsFeature {
 					mc.gui.setScreen(new HubsScreen());
 				}
 			}
+			if (++tick % 20 == 0) {
+				connectPendingRepos(mc);
+			}
 		});
+		DevBridge.registerScreen("newhub", mc -> new NewHubScreen(null));
+		DevBridge.register("dev.newhub", 10_000, "{hub?, name?, folder?, press?: theme|create|back, arg?:0} - drive the new-hub form (opens it first)",
+			(req, mc) -> {
+				dev.agentcraft.client.dev.Fields f = dev.agentcraft.client.dev.Fields.of(req);
+				String id = f.optStr("hub", null);
+				String name = f.optStr("name", "");
+				String folder = f.optStr("folder", null);
+				String press = f.optStr("press", null);
+				int arg = f.optInt("arg", 0, 0, 20);
+				return DevBridge.onClient(mc, () -> {
+					if (!(mc.gui.screen() instanceof NewHubScreen)) {
+						mc.gui.setScreen(new NewHubScreen(null));
+					}
+					NewHubScreen s = (NewHubScreen) mc.gui.screen();
+					if (id != null) {
+						s.fill(id, name, folder);
+					}
+					if (press != null) {
+						s.press(press, arg);
+					}
+					com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+					o.addProperty("screen", mc.gui.screen() == null ? null : mc.gui.screen().getClass().getSimpleName());
+					o.addProperty("pending", PENDING_REPOS.toString());
+					return o;
+				});
+			});
 		Hubs.addSwitchListener(hub -> {
 			if (hub.id().equals(answerOnArrival)) {
 				answerOnArrival = null;
@@ -69,6 +101,123 @@ public final class HubsFeature {
 					return o;
 				});
 			});
+	}
+
+	/**
+	 * A new hub from the GUI: created in the next free spot with {@code theme} (so the studio is built
+	 * once, already themed), built, and the player taken there; {@code folder} (optional) is connected
+	 * to the hub's Foreman once that is up, made a git repo first if it is not one. Client thread.
+	 */
+	public static void createHub(String id, String name, String theme, @Nullable String folder) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return;
+		}
+		if (folder != null) {
+			PENDING_REPOS.put(id, folder);
+		}
+		mc.player.sendSystemMessage(Component.literal("Creating hub '" + id + "': building its studio..."));
+		MinecraftServer server = mc.getSingleplayerServer();
+		if (server == null) {
+			// on a server: the commands (they need operator rights there)
+			mc.player.connection.sendCommand("agentcraft hub create " + id + (name.isBlank() ? "" : " " + name));
+			if (!"warm".equals(theme)) {
+				mc.player.connection.sendCommand("agentcraft hub theme " + id + " " + theme);
+			}
+			return;
+		}
+		UUID who = mc.player.getUUID();
+		server.execute(() -> {
+			ServerPlayer p = server.getPlayerList().getPlayer(who);
+			if (p == null) {
+				return;
+			}
+			try {
+				dev.agentcraft.layout.HubRegistry.create(server, id, name);
+				if (!"warm".equals(theme)) {
+					dev.agentcraft.layout.HubRegistry.setTheme(server, id, theme);
+				}
+			} catch (IllegalArgumentException e) {
+				PENDING_REPOS.remove(id);
+				p.sendSystemMessage(Component.literal("Couldn't create the hub: " + e.getMessage()).withStyle(net.minecraft.ChatFormatting.RED));
+				return;
+			}
+			// the world's owner builds through the same commands as /ac hub create, cheats on or off
+			var src = p.createCommandSourceStack().withMaximumPermission(net.minecraft.server.permissions.LevelBasedPermissionSet.GAMEMASTER);
+			server.getCommands().performPrefixedCommand(src, "agentcraft hub build " + id);
+			server.getCommands().performPrefixedCommand(src, "agentcraft hub tp " + id);
+			dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: created hub '{}' (theme {}, project {})", id, theme, folder);
+		});
+	}
+
+	/** New hubs whose Foreman is up: connect their project folder (making it a git repo first). Client thread. */
+	private static void connectPendingRepos(Minecraft mc) {
+		for (var e : java.util.List.copyOf(PENDING_REPOS.entrySet())) {
+			Hub hub = Hubs.get(e.getKey());
+			if (hub == null || !hub.connected() || !hub.state().hasData()) {
+				continue;
+			}
+			PENDING_REPOS.remove(e.getKey());
+			String folder = e.getValue();
+			java.util.concurrent.CompletableFuture.supplyAsync(() -> prepareRepo(folder, hub.name())).whenComplete((made, err) -> mc.execute(() -> {
+				if (err != null) {
+					say(mc, "Couldn't set up " + folder + ": " + (err.getCause() != null ? err.getCause().getMessage() : err.getMessage()));
+					return;
+				}
+				dev.agentcraft.client.foreman.Foreman.addRepoTo(hub, folder).whenComplete((ack, err2) -> say(mc, err2 != null || !ack.ok()
+					? "Couldn't connect " + folder + " to '" + hub.id() + "': " + (err2 != null ? err2.getMessage() : ack.error())
+					: "Hub '" + hub.id() + "' is working on " + folder + (made ? " (a new git repo)" : "") + ". Give its team a goal in the console."));
+			}));
+		}
+	}
+
+	private static void say(Minecraft mc, String text) {
+		if (mc.player != null) {
+			mc.player.sendSystemMessage(Component.literal(text));
+		}
+	}
+
+	/** Makes {@code folder} a git repo with a first commit unless it is one; true when it did. Any thread. */
+	static boolean prepareRepo(String folder, String title) {
+		try {
+			java.nio.file.Path dir = java.nio.file.Path.of(folder);
+			if (java.nio.file.Files.isDirectory(dir.resolve(".git"))) {
+				return false;
+			}
+			java.nio.file.Files.createDirectories(dir);
+			if (!java.nio.file.Files.exists(dir.resolve("README.md"))) {
+				java.nio.file.Files.writeString(dir.resolve("README.md"), "# " + title + "\n");
+			}
+			git(dir, "init", "-b", "main");
+			git(dir, "add", "-A");
+			boolean named = !gitOut(dir, "config", "--get", "user.name").isBlank();
+			if (named) {
+				git(dir, "commit", "-m", "Initial commit");
+			} else {
+				git(dir, "-c", "user.name=AgentCraft", "-c", "user.email=agentcraft@localhost", "commit", "-m", "Initial commit");
+			}
+			return true;
+		} catch (java.io.IOException | InterruptedException e) {
+			throw new IllegalStateException(e.getMessage(), e);
+		}
+	}
+
+	private static void git(java.nio.file.Path dir, String... args) throws java.io.IOException, InterruptedException {
+		String out = gitOut(dir, args);
+		dev.agentcraft.AgentCraft.LOGGER.debug("git {}: {}", String.join(" ", args), out);
+	}
+
+	private static String gitOut(java.nio.file.Path dir, String... args) throws java.io.IOException, InterruptedException {
+		java.util.List<String> cmd = new java.util.ArrayList<>(java.util.List.of("git"));
+		cmd.addAll(java.util.List.of(args));
+		Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
+		String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+		int code = p.waitFor();
+		// config --get exits 1 when unset: that is an answer, not a failure
+		if (code != 0 && !(args.length > 0 && args[0].equals("config"))) {
+			throw new java.io.IOException("git " + String.join(" ", args) + " failed: " + out.trim());
+		}
+		return code == 0 ? out.trim() : "";
 	}
 
 	/** Go to {@code hub}'s studio; {@code answer}: open its decisions there. Client thread. */

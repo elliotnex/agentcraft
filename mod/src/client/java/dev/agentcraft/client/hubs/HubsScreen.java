@@ -71,7 +71,7 @@ public class HubsScreen extends Screen {
 		int listH = Math.min(hubs.size() * CARD_H, Math.max(CARD_H, height - 80));
 		maxScroll = Math.max(0, hubs.size() * CARD_H - listH);
 		scroll = Math.max(0, Math.min(scroll, maxScroll));
-		int h = pad.top() + 14 + 8 + listH + 16 + pad.bottom();
+		int h = pad.top() + 14 + 8 + listH + 26 + pad.bottom();
 		int px = (width - W) / 2;
 		int py = Math.max(4, (height - h) / 2);
 		Panels.panel(g, px, py, W, h);
@@ -95,10 +95,13 @@ public class HubsScreen extends Screen {
 		}
 		g.disableScissor();
 		int fy = listTop + listH + 5;
-		String keys = "1-" + Math.min(9, hubs.size()) + " go to a hub";
-		String tail = maxScroll > 0 ? scroll < maxScroll ? "scroll for more" : "" : "/agentcraft hub create <id> adds one";
-		Panels.text(g, font, keys, x, fy, muted);
-		Panels.text(g, font, tail, x + inner - font.width(tail), fy, muted);
+		String keys = "1-" + Math.min(9, hubs.size()) + " go to a hub  ·  N new hub" + (maxScroll > 0 && scroll < maxScroll ? "  ·  scroll for more" : "");
+		Panels.text(g, font, keys, x, fy + 6, muted);
+		String add = "New hub";
+		int aw = UiBits.buttonWidth(font, add, 0);
+		boolean hover = mouseX >= x + inner - aw && mouseX < x + inner && mouseY >= fy && mouseY < fy + 20;
+		UiBits.button(g, font, add, 0, x + inner - aw, fy, aw, true, hover ? UiBits.ButtonState.HOVER : UiBits.ButtonState.NORMAL, false);
+		buttons.add(new Btn("new", "", x + inner - aw, fy, aw));
 	}
 
 	private void card(GuiGraphicsExtractor g, Hub hub, int number, int x, int y, int w, int mx, int my, int clipTop, int clipBottom) {
@@ -241,6 +244,10 @@ public class HubsScreen extends Screen {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		int k = event.key();
+		if (k == InputConstants.KEY_N) {
+			press("new", "");
+			return true;
+		}
 		if (k >= InputConstants.KEY_1 && k <= InputConstants.KEY_9) {
 			List<Hub> hubs = Hubs.all();
 			int i = k - InputConstants.KEY_1;
@@ -254,6 +261,10 @@ public class HubsScreen extends Screen {
 
 	/** go | answer for a hub (also the dev command). */
 	public void press(String action, String hubId) {
+		if (action.equals("new")) {
+			minecraft.gui.setScreen(new NewHubScreen(this));
+			return;
+		}
 		@Nullable Hub hub = Hubs.get(hubId);
 		if (hub == null) {
 			return;

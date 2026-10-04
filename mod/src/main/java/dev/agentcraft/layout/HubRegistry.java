@@ -258,8 +258,11 @@ public final class HubRegistry {
 		if (!validId(key)) {
 			throw new IllegalArgumentException("hub id must be 1-32 of a-z 0-9 _ - (got '" + id + "')");
 		}
-		if (get(key) != null) {
+		if (get(key) != null || MAIN.equals(key)) {
 			throw new IllegalArgumentException("hub '" + key + "' already exists");
+		}
+		if (dev.agentcraft.hq.FreelancePavilion.HUB.equals(key)) {
+			throw new IllegalArgumentException("'" + key + "' is the freelancer's hub (the pavilion in the plaza); pick another id");
 		}
 		int slot = hubs.stream().mapToInt(Hub::slot).max().orElse(0) + 1;
 		// the port belongs to the project (profile), machine-wide: another world's hub never shares it
