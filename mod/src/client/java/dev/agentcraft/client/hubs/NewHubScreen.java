@@ -1,6 +1,10 @@
 package dev.agentcraft.client.hubs;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.agentcraft.AgentCraft;
 import dev.agentcraft.client.foreman.Hub;
 import dev.agentcraft.client.foreman.Hubs;
 import dev.agentcraft.client.foreman.Protocol.Repo;
@@ -12,11 +16,14 @@ import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.hq.FreelancePavilion;
 import dev.agentcraft.hq.Theme;
 import dev.agentcraft.layout.HubRegistry;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -26,22 +33,46 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A new hub from the hubs overview: id, name, a theme and the project folder (an existing git repo,
- * or a new folder that becomes one). Create builds the studio in the next free spot with that theme,
- * takes you there, and connects the project to the hub's Foreman once it is up
- * ({@link HubsFeature#createHub}).
+ * A new hub from the hubs overview: id, name, a theme and where its project comes from - a GitHub
+ * repository (pick one of yours, listed with {@code gh}, or paste any URL; it is cloned next to the
+ * other projects) or a local folder (an existing git repo, or a folder that becomes one). Create
+ * builds the studio in the next free spot with that theme, takes you there, and connects the project
+ * to the hub's Foreman once it is up ({@link HubsFeature#createHub}).
  */
 public class NewHubScreen extends Screen {
-	private static final int W = 340;
+	private static final int W = 360;
+	private static final int REPO_ROWS = 6;
+	private static final int ROW = 12;
+	/** The last source picked (GitHub first: starting from an existing repository is the common case). */
+	private static boolean lastGithub = true;
+	/** Your GitHub repositories (gh repo list), fetched once per session. */
+	private static List<GhRepo> ghRepos = List.of();
+	private static @Nullable String ghError;
+	private static boolean ghLoading;
+	private static boolean ghLoaded;
+
 	private final @Nullable Screen back;
 	private final List<Btn> buttons = new ArrayList<>();
 	private @Nullable EditBox id;
 	private @Nullable EditBox name;
 	private @Nullable EditBox folder;
+	private @Nullable EditBox url;
+	private boolean github = lastGithub;
 	private String theme = "warm";
 	private boolean folderTouched;
+	private boolean idTouched;
+	private boolean settingId;
+	private int repoScroll;
+	private int repoMax;
 	private String note = "";
 	private int px, py, inner;
+
+	record GhRepo(String nameWithOwner, String url, boolean isPrivate, String description) {
+		String repoName() {
+			int i = nameWithOwner.indexOf('/');
+			return i >= 0 ? nameWithOwner.substring(i + 1) : nameWithOwner;
+		}
+	}
 
 	private record Btn(String action, int arg, int x, int y, int w, int h) {
 		boolean hit(double mx, double my) {
@@ -59,22 +90,30 @@ public class NewHubScreen extends Screen {
 		return false;
 	}
 
+	private int panelHeight() {
+		Kit.Padding pad = Kit.padding("panel_paper");
+		return pad.top() + 22 + (github ? 150 + REPO_ROWS * ROW : 140) + 26 + pad.bottom();
+	}
+
 	@Override
 	protected void init() {
 		Kit.Padding pad = Kit.padding("panel_paper");
 		inner = W - pad.left() - pad.right();
 		px = (width - W) / 2;
-		py = Math.max(4, (height - 230) / 2);
+		py = Math.max(4, (height - panelHeight()) / 2);
 		int x = px + pad.left() + 70;
 		int y = py + pad.top() + 22;
 		int fw = inner - 74;
 		id = addRenderableWidget(field(x, y + 4, fw, id, 32, "Id"));
 		id.setResponder(v -> {
 			// ids are a-z 0-9 _ - (also the project's Foreman profile): clean up what is typed or pasted
-			String clean = v.toLowerCase(Locale.ROOT).replace(' ', '-').replaceAll("[^a-z0-9_-]", "");
+			String clean = slug(v);
 			if (!clean.equals(v)) {
 				id.setValue(clean);
 				return;
+			}
+			if (!settingId) {
+				idTouched = !v.isEmpty();
 			}
 			if (!folderTouched && folder != null) {
 				folder.setValue(suggestFolder(v));
@@ -82,8 +121,14 @@ public class NewHubScreen extends Screen {
 			}
 		});
 		name = addRenderableWidget(field(x, y + 26, fw, name, 40, "Name"));
-		folder = addRenderableWidget(field(x, y + 92, fw, folder, 400, "Project folder or GitHub URL"));
-		folder.setResponder(v -> folderTouched = true);
+		if (github) {
+			url = addRenderableWidget(field(x, y + 116, fw, url, 400, "GitHub repository"));
+			url.setResponder(v -> repoScroll = 0);
+			loadGhRepos();
+		} else {
+			folder = addRenderableWidget(field(x, y + 116, fw, folder, 400, "Project folder"));
+			folder.setResponder(v -> folderTouched = true);
+		}
 		setFocused(id);
 		id.setFocused(true);
 	}
@@ -96,6 +141,10 @@ public class NewHubScreen extends Screen {
 		f.setMaxLength(max);
 		f.setValue(old == null ? "" : old.getValue());
 		return f;
+	}
+
+	static String slug(String v) {
+		return v.toLowerCase(Locale.ROOT).replace(' ', '-').replace('.', '-').replaceAll("[^a-z0-9_-]", "");
 	}
 
 	/** Next to the other projects: the folder holding the first hub repo, plus the id. */
@@ -122,11 +171,98 @@ public class NewHubScreen extends Screen {
 		return suggestFolder(HubSettingsScreen.nameFromUrl(url));
 	}
 
+	/** Drops terminal colour codes (ESC [ ... letter), in case a tool colours its output anyway. */
+	static String stripAnsi(String s) {
+		StringBuilder b = new StringBuilder(s.length());
+		for (int i = 0; i < s.length(); i++) {
+			char c = s.charAt(i);
+			if (c == 27 && i + 1 < s.length() && s.charAt(i + 1) == '[') {
+				int j = i + 2;
+				while (j < s.length() && !Character.isLetter(s.charAt(j))) {
+					j++;
+				}
+				i = j;
+				continue;
+			}
+			b.append(c);
+		}
+		return b.toString();
+	}
+
+	/** Your repositories via the GitHub CLI (once per session; any thread works, results land on the client thread). */
+	static void loadGhRepos() {
+		if (ghLoading || ghLoaded) {
+			return;
+		}
+		ghLoading = true;
+		CompletableFuture.supplyAsync(() -> {
+			try {
+				ProcessBuilder pb = new ProcessBuilder("gh", "repo", "list", "--limit", "100", "--json", "nameWithOwner,url,isPrivate,description");
+				// plain JSON: no colours even when the user's environment forces them (FORCE_COLOR, CLICOLOR_FORCE)
+				var env = pb.environment();
+				env.keySet().removeAll(List.of("FORCE_COLOR", "CLICOLOR_FORCE", "GH_FORCE_TTY"));
+				env.put("NO_COLOR", "1");
+				env.put("CLICOLOR", "0");
+				env.put("GH_PROMPT_DISABLED", "1");
+				Process p = pb.start();
+				p.getOutputStream().close();
+				String out = stripAnsi(new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+				String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+				if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) {
+					throw new IllegalStateException(err.isBlank() ? "gh repo list failed" : err.trim().split("\n")[0]);
+				}
+				List<GhRepo> list = new ArrayList<>();
+				for (JsonElement e : JsonParser.parseString(out).getAsJsonArray()) {
+					JsonObject o = e.getAsJsonObject();
+					list.add(new GhRepo(o.get("nameWithOwner").getAsString(), o.get("url").getAsString(), o.has("isPrivate") && o.get("isPrivate").getAsBoolean(),
+						o.has("description") && !o.get("description").isJsonNull() ? o.get("description").getAsString() : ""));
+				}
+				return list;
+			} catch (com.google.gson.JsonParseException | IllegalStateException e) {
+				throw new IllegalStateException("couldn't list your GitHub repositories (" + e.getMessage() + "): paste a URL instead");
+			} catch (java.io.IOException e) {
+				throw new IllegalStateException("the GitHub CLI (gh) isn't installed: paste a repository URL instead");
+			} catch (InterruptedException e) {
+				throw new IllegalStateException("interrupted");
+			}
+		}).whenComplete((list, err) -> net.minecraft.client.Minecraft.getInstance().execute(() -> {
+			ghLoading = false;
+			ghLoaded = true;
+			if (err != null) {
+				ghError = err.getCause() != null ? err.getCause().getMessage() : err.getMessage();
+				AgentCraft.LOGGER.info("New hub: no GitHub repo list ({})", ghError);
+			} else {
+				ghRepos = List.copyOf(list);
+			}
+		}));
+	}
+
+	/** Your repositories, filtered by the words typed in the URL field (unless it holds a URL). */
+	private List<GhRepo> shownRepos() {
+		String q = url == null ? "" : url.getValue().trim().toLowerCase(Locale.ROOT);
+		if (HubSettingsScreen.isUrl(q)) {
+			q = "";
+		}
+		String[] words = q.isEmpty() ? new String[0] : q.split("\\s+");
+		List<GhRepo> out = new ArrayList<>();
+		for (GhRepo r : ghRepos) {
+			String hay = (r.nameWithOwner() + " " + r.description()).toLowerCase(Locale.ROOT);
+			boolean all = true;
+			for (String w : words) {
+				all &= hay.contains(w);
+			}
+			if (all) {
+				out.add(r);
+			}
+		}
+		return out;
+	}
+
 	/** Why the form cannot be sent yet, or null. */
 	private @Nullable String problem() {
 		String v = id == null ? "" : id.getValue();
 		if (v.isBlank()) {
-			return "Give the hub an id (a-z, 0-9, - and _): it is also its project's name";
+			return github ? "Pick a repository (or paste its URL), or give the hub an id" : "Give the hub an id (a-z, 0-9, - and _): it is also its project's name";
 		}
 		if (HubRegistry.MAIN.equals(v) || HubRegistry.get(v) != null) {
 			return "There is already a hub '" + v + "'";
@@ -137,28 +273,39 @@ public class NewHubScreen extends Screen {
 		if (HubRegistry.COMPASS.equals(HubRegistry.layout()) && HubRegistry.freeSpot(HubRegistry.all()) == null) {
 			return "The town is full";
 		}
+		if (github) {
+			String u = url == null ? "" : url.getValue().trim();
+			if (!HubSettingsScreen.isUrl(u)) {
+				return u.isEmpty() ? "Pick one of your repositories below, or paste a GitHub URL" : "Pick a repository from the list, or paste a full https:// URL";
+			}
+		}
 		return null;
 	}
 
-	private String folderState() {
+	private String projectState() {
+		if (github) {
+			String u = url == null ? "" : url.getValue().trim();
+			if (HubSettingsScreen.isUrl(u)) {
+				return "Clones " + HubSettingsScreen.shortRemote(u) + " into " + cloneTarget(u);
+			}
+			return ghLoading ? "Loading your GitHub repositories..." : ghError != null ? ghError : ghRepos.isEmpty() ? "Paste any repository URL"
+				: "Pick one of your " + ghRepos.size() + " repositories below (scroll, or type to search), or paste a URL";
+		}
 		String f = folder == null ? "" : folder.getValue().trim();
 		if (f.isEmpty()) {
-			return "no project yet (add one later in the hub's Settings)";
-		}
-		if (HubSettingsScreen.isUrl(f)) {
-			return "a GitHub URL: cloned into " + cloneTarget(f);
+			return "No project yet (add one later in the hub's Settings)";
 		}
 		try {
 			Path p = Path.of(f);
 			if (Files.isDirectory(p.resolve(".git"))) {
-				return "an existing git repo: connected as it is";
+				return "An existing git repo: connected as it is";
 			}
 			if (Files.isDirectory(p)) {
-				return "an existing folder: it becomes a git repo";
+				return "An existing folder: it becomes a git repo";
 			}
-			return "a new folder: created as an empty git repo";
+			return "A new folder: created as an empty git repo";
 		} catch (RuntimeException e) {
-			return "not a valid path";
+			return "Not a valid path";
 		}
 	}
 
@@ -173,7 +320,7 @@ public class NewHubScreen extends Screen {
 		int ink = UiBits.ink();
 		int muted = UiBits.muted();
 		Kit.Padding pad = Kit.padding("panel_paper");
-		int h = pad.top() + 200 + pad.bottom();
+		int h = panelHeight();
 		Panels.panel(g, px, py, W, h);
 		int x = px + pad.left();
 		int y = py + pad.top();
@@ -194,7 +341,6 @@ public class NewHubScreen extends Screen {
 			String label = t.name.replace(" Studio", "");
 			int bw = 12 + font.width(label) + 8;
 			if (tx + bw > x + inner) {
-				// wrap onto a second row
 				tx = x + 70;
 				ty += 19;
 			}
@@ -206,9 +352,21 @@ public class NewHubScreen extends Screen {
 			buttons.add(new Btn("theme", i, tx, ty, bw, 16));
 			tx += bw + 3;
 		}
-		row(g, "Project", x, y + 88, muted);
-		Panels.text(g, font, TextUtil.ellipsize(font, folderState(), inner - 70), x + 70, y + 106, muted);
+		// project: where it comes from
+		Panels.text(g, font, "Project", x, y + 92, muted);
+		int sx = x + 70;
+		sx += button(g, "source", 1, "From GitHub", sx, y + 86, github, mouseX, mouseY) + 4;
+		button(g, "source", 0, "Local folder", sx, y + 86, !github, mouseX, mouseY);
+		row(g, github ? "Repository" : "Folder", x, y + 112, muted);
+		if (github && url != null && url.getValue().isEmpty() && !url.isFocused()) {
+			Panels.text(g, font, "https://github.com/owner/repo, or search yours", x + 74, y + 116, muted);
+		}
+		Panels.text(g, font, TextUtil.ellipsize(font, projectState(), inner - 70), x + 70, y + 132, ghError != null && github && !HubSettingsScreen.isUrl(
+			url == null ? "" : url.getValue()) ? UiStyle.CLAY_DARK : muted);
 		super.extractRenderState(g, mouseX, mouseY, partial);
+		if (github) {
+			drawRepos(g, x, y + 146, mouseX, mouseY);
+		}
 		// footer
 		int fy = py + h - pad.bottom() - 20;
 		String create = "Create hub";
@@ -225,6 +383,54 @@ public class NewHubScreen extends Screen {
 		buttons.add(new Btn("back", 0, x + inner - cw - 6 - bw, fy, bw, 20));
 		String hint = !note.isEmpty() ? note : why != null ? why : "Builds the studio, takes you there; its team starts with its Foreman";
 		Panels.text(g, font, TextUtil.ellipsize(font, hint, inner - cw - bw - 16), x, fy + 6, why != null && note.isEmpty() ? UiStyle.CLAY_DARK : muted);
+	}
+
+	/** Your repositories: owner/name, private or public; a click picks one. */
+	private void drawRepos(GuiGraphicsExtractor g, int x, int y, int mx, int my) {
+		int ink = UiBits.ink();
+		int muted = UiBits.muted();
+		List<GhRepo> list = shownRepos();
+		repoMax = Math.max(0, list.size() - REPO_ROWS);
+		repoScroll = Math.max(0, Math.min(repoScroll, repoMax));
+		g.fill(x, y - 2, x + inner, y + REPO_ROWS * ROW + 2, UiStyle.withAlpha(UiStyle.WALNUT, 14));
+		if (list.isEmpty()) {
+			String why = ghLoading ? "Loading..." : ghError != null ? "No list (" + ghError + ")" : ghRepos.isEmpty() ? "No repositories on your GitHub account"
+				: "No match: paste the URL instead";
+			Panels.text(g, font, TextUtil.ellipsize(font, why, inner - 8), x + 4, y + 2, muted);
+			return;
+		}
+		String picked = url == null ? "" : url.getValue().trim();
+		for (int i = repoScroll; i < Math.min(list.size(), repoScroll + REPO_ROWS); i++) {
+			GhRepo r = list.get(i);
+			int ry = y + (i - repoScroll) * ROW;
+			boolean on = r.url().equalsIgnoreCase(picked) || (r.url() + ".git").equalsIgnoreCase(picked);
+			boolean hover = mx >= x && mx < x + inner && my >= ry && my < ry + ROW;
+			if (on || hover) {
+				g.fill(x, ry, x + inner, ry + ROW, UiStyle.withAlpha(on ? UiStyle.TEAL : UiStyle.WALNUT, on ? 70 : 40));
+			}
+			String vis = r.isPrivate() ? "private" : "public";
+			int vw = font.width(vis);
+			String label = r.nameWithOwner() + (r.description().isBlank() ? "" : "  ·  " + r.description());
+			Panels.text(g, font, TextUtil.ellipsize(font, label, inner - vw - 14), x + 4, y + (i - repoScroll) * ROW + 2, ink);
+			Panels.text(g, font, vis, x + inner - vw - 4, ry + 2, muted);
+			buttons.add(new Btn("repo", i, x, ry, inner, ROW));
+		}
+		if (repoMax > 0) {
+			// a scroll bar on the right edge of the list
+			int trackH = REPO_ROWS * ROW;
+			int thumbH = Math.max(6, trackH * REPO_ROWS / list.size());
+			int thumbY = y + (trackH - thumbH) * repoScroll / repoMax;
+			g.fill(x + inner - 2, y, x + inner, y + trackH, UiStyle.withAlpha(UiStyle.WALNUT, 30));
+			g.fill(x + inner - 2, thumbY, x + inner, thumbY + thumbH, UiStyle.withAlpha(UiStyle.WALNUT, 140));
+		}
+	}
+
+	private int button(GuiGraphicsExtractor g, String action, int arg, String label, int x, int y, boolean primary, int mx, int my) {
+		int bw = UiBits.buttonWidth(font, label, 0);
+		boolean hover = mx >= x && mx < x + bw && my >= y && my < y + 20;
+		UiBits.button(g, font, label, 0, x, y, bw, primary, hover ? UiBits.ButtonState.HOVER : UiBits.ButtonState.NORMAL, false);
+		buttons.add(new Btn(action, arg, x, y, bw, 20));
+		return bw;
 	}
 
 	private void row(GuiGraphicsExtractor g, String label, int x, int y, int muted) {
@@ -246,6 +452,15 @@ public class NewHubScreen extends Screen {
 	}
 
 	@Override
+	public boolean mouseScrolled(double mx, double my, double dx, double dy) {
+		if (github) {
+			repoScroll = Math.max(0, Math.min(repoMax, repoScroll - (int) Math.signum(dy)));
+			return true;
+		}
+		return super.mouseScrolled(mx, my, dx, dy);
+	}
+
+	@Override
 	public boolean keyPressed(KeyEvent event) {
 		int k = event.key();
 		if (k == InputConstants.KEY_RETURN || k == InputConstants.KEY_NUMPADENTER) {
@@ -253,15 +468,14 @@ public class NewHubScreen extends Screen {
 			return true;
 		}
 		if (k == InputConstants.KEY_TAB) {
-			EditBox[] order = {id, name, folder};
+			EditBox[] order = {id, name, github ? url : folder};
 			int at = 0;
 			for (int i = 0; i < order.length; i++) {
 				if (getFocused() == order[i]) {
 					at = i;
 				}
 			}
-			EditBox next = order[(at + 1) % order.length];
-			setFocused(next);
+			setFocused(order[(at + 1) % order.length]);
 			return true;
 		}
 		return super.keyPressed(event);
@@ -272,12 +486,33 @@ public class NewHubScreen extends Screen {
 		minecraft.gui.setScreen(back);
 	}
 
-	/** theme n | create | back (also the dev command). */
+	/** theme n | source 1 (GitHub) / 0 (folder) | repo n | create | back (also the dev command). */
 	void press(String action, int arg) {
 		switch (action) {
 			case "theme" -> {
 				if (arg >= 0 && arg < Theme.ALL.size()) {
 					theme = Theme.ALL.get(arg).id;
+				}
+			}
+			case "source" -> {
+				boolean gh = arg == 1;
+				if (gh != github) {
+					github = gh;
+					lastGithub = gh;
+					rebuildWidgets();
+				}
+			}
+			case "repo" -> {
+				List<GhRepo> list = shownRepos();
+				if (arg >= 0 && arg < list.size() && url != null) {
+					GhRepo r = list.get(arg);
+					url.setValue(r.url());
+					// an empty id (or one we filled in) follows the repository
+					if (id != null && !idTouched) {
+						settingId = true;
+						id.setValue(slug(r.repoName()));
+						settingId = false;
+					}
 				}
 			}
 			case "create" -> {
@@ -288,7 +523,7 @@ public class NewHubScreen extends Screen {
 				}
 				String hubId = id.getValue().trim().toLowerCase(Locale.ROOT);
 				String hubName = name.getValue().trim();
-				String path = folder.getValue().trim();
+				String path = github ? url.getValue().trim() : folder.getValue().trim();
 				minecraft.gui.setScreen(null);
 				HubsFeature.createHub(hubId, hubName, theme, path.isEmpty() ? null : path);
 			}
@@ -305,8 +540,28 @@ public class NewHubScreen extends Screen {
 		if (name != null) {
 			name.setValue(hubName);
 		}
-		if (path != null && folder != null) {
-			folder.setValue(path);
+		if (path != null) {
+			if (github && url != null) {
+				url.setValue(path);
+			} else if (folder != null) {
+				folder.setValue(path);
+			}
 		}
+	}
+
+	boolean github() {
+		return github;
+	}
+
+	int repoCount() {
+		return shownRepos().size();
+	}
+
+	@Nullable String urlValue() {
+		return url == null ? null : url.getValue();
+	}
+
+	@Nullable String idValue() {
+		return id == null ? null : id.getValue();
 	}
 }

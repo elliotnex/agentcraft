@@ -90,7 +90,7 @@ public final class HubsFeature {
 					return o;
 				});
 			});
-		DevBridge.register("dev.newhub", 10_000, "{hub?, name?, folder?, press?: theme|create|back, arg?:0} - drive the new-hub form (opens it first)",
+		DevBridge.register("dev.newhub", 10_000, "{hub?, name?, folder?, press?: theme|source|repo|create|back, arg?:0} - drive the new-hub form (opens it first; source 1 = GitHub)",
 			(req, mc) -> {
 				dev.agentcraft.client.dev.Fields f = dev.agentcraft.client.dev.Fields.of(req);
 				String id = f.optStr("hub", null);
@@ -112,6 +112,11 @@ public final class HubsFeature {
 					com.google.gson.JsonObject o = new com.google.gson.JsonObject();
 					o.addProperty("screen", mc.gui.screen() == null ? null : mc.gui.screen().getClass().getSimpleName());
 					o.addProperty("pending", PENDING_REPOS.toString());
+					if (mc.gui.screen() instanceof NewHubScreen form) {
+						o.addProperty("github", form.github());
+						o.addProperty("url", String.valueOf(form.urlValue()));
+						o.addProperty("id", String.valueOf(form.idValue()));
+					}
 					return o;
 				});
 			});
