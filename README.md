@@ -10,7 +10,7 @@
 [![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-8fa98b)](https://www.minecraft.net)
 [![Fabric](https://img.shields.io/badge/mod%20loader-Fabric-d97757)](https://fabricmc.net)
 [![Claude Agent SDK](https://img.shields.io/badge/agents-Claude%20Agent%20SDK-2fa3a0)](https://code.claude.com/docs/en/agent-sdk/overview)
-[![Tests](https://img.shields.io/badge/tests-482%20passing-3b2a20)](foreman/test)
+[![Tests](https://img.shields.io/badge/tests-530%2B%20passing-3b2a20)](foreman/test)
 
 <img src="docs/img/readme/hero.jpg" alt="The AgentCraft HQ at golden hour" width="100%">
 
@@ -24,9 +24,91 @@ You type a goal. A lead agent reads your repo, writes a plan and pins tasks to a
 their desks, sit down and start coding in their own git worktrees while their monitors stream every
 file they read and every line they change. When a call is genuinely yours, an agent walks over to
 you with a question. When work is ready, you review the real diff and press **Merge**. Nothing
-touches your branch without that click, and nothing is ever pushed.
+touches your branch without that click, and nothing reaches GitHub unless you press **Push** (or
+switch on auto-push for that project).
 
 Close the game and the agents keep working. Open it again and the studio catches up.
+
+<br>
+
+## New in this fork
+
+This fork of [blendi-remade/agentcraft](https://github.com/blendi-remade/agentcraft) turns the single
+studio into a town of projects, adds a freelancer that runs on any AI model, and links projects to
+GitHub.
+
+<img src="docs/img/readme/town-plaza.jpg" alt="The town plaza: the fountain, the help boards and the freelancer's pavilion" width="100%">
+
+### Many hubs in one world
+
+Every project gets its own **hub**: a studio with its own team, task wall, decisions and memory, run
+by its own Foreman. Hubs stand around a central plaza (the *compass town*) joined by roads, and each
+can wear a theme: Warm, Cherry Blossom, Birch & Sage, Ember or Midnight, landscape included.
+
+- **Hubs overview (<kbd>H</kbd>).** Every hub at a glance: its goal and progress, task counts, its
+  team and how many decisions wait there. **Go** teleports you to a hub, **Answer** takes you there
+  and opens its decisions, **Settings** manages its projects.
+- **New hub, from the game.** <kbd>H</kbd> → **New hub**: an id, a name, a theme, and the project
+  **from GitHub** (your repositories are listed through `gh`; pick one or paste any URL) or **from a
+  local folder** (made a git repo if it is not one). The studio builds in the next free spot and you
+  are taken there.
+- **The game starts each hub's Foreman** when you visit it (`"hubs": {"autoStart": true}` in
+  `~/.agentcraft/config.json`), and every project owns its own port on the machine, so two worlds
+  never talk to each other's projects.
+- **Cross-hub alerts.** Decisions waiting in other hubs show in the HUD and as toasts.
+- **The plaza** has a live **hub wall**, help boards for keys, console and hub commands, and the
+  freelancer's pavilion.
+- **The Wayfinder.** A compass item (you get one on your first visit, or `/ac wayfinder`): right-click
+  for a menu that teleports you to the plaza, any hub, or any station in a studio: the task wall,
+  the podium, the merge station, each agent's desk.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/img/readme/hubs-overview.jpg" alt="The hubs overview: every hub with its goal, team and decisions"></td>
+<td width="50%"><img src="docs/img/readme/hub-cherry.jpg" alt="A hub in the Cherry Blossom theme"></td>
+</tr>
+</table>
+
+### The freelancer: Scout, on any model
+
+A pavilion beside the fountain houses **Scout**, a freelancer for one-off jobs that runs on **any AI
+model**: [OpenRouter](https://openrouter.ai) by default (GPT, Claude, Gemini, DeepSeek, Qwen and
+hundreds more behind one key), or a local Ollama or LM Studio. Right-click the pavilion's terminal:
+
+- **Pick a model** from the endpoint's **live catalog with prices** (input and output cost per million
+  tokens, context size, which models can use tools), or type any model id.
+- **Pick a repository** from any hub's projects.
+- **Task** (Scout changes code in its own branch; you review the diff and merge it like the team's
+  work) or **Ask** (a question about the code; the answer comes in chat).
+- Every job shows **its model and what it cost**, from OpenRouter's own figures.
+
+Scout has its own tool-calling loop (the Claude Agent SDK only drives Claude models), with the same
+safety as the team: files stay inside its worktree, commands go through the permission policy and
+git cannot push. Set your key once with `setx OPENROUTER_API_KEY sk-or-...`; it is never stored in the
+world or the repo.
+
+<img src="docs/img/readme/freelancer-models.jpg" alt="The freelancer's model picker: the live OpenRouter catalog with prices" width="100%">
+
+### GitHub projects
+
+Each hub's **Settings** (from its card in the overview) lists its projects:
+
+- **Projects:** make one the default for new goals, add a folder or **clone a GitHub URL**, remove one
+  (its files stay; refused while work on it is in flight).
+- **GitHub, per project:** the remote and how far your branch is ahead or behind, **Fetch**, **Pull**
+  (fast-forward only), **Push**, **Publish to GitHub** (creates a private or public repository with
+  `gh` and pushes it), and **auto-push** after every merge you approve.
+
+These are the only network git operations in AgentCraft. They run only when you press them (or after
+a merge you approved, with auto-push on), with your own git and `gh` login. The agents still cannot
+fetch or push.
+
+### And more
+
+- **Auto-approve** permission prompts at the level you choose: `off`, `worktree`, `network` (default)
+  or `all`, in `{"claude": {"autoApprove": "network"}}`.
+- **`/ac`** works for every `/agentcraft` command.
+- **Agents stay calm** when you stand next to them (they used to twitch when turning to face you).
 
 <br>
 
@@ -185,7 +267,7 @@ Minecraft: Java Edition.
 Then:
 
 ```powershell
-git clone https://github.com/blendi-remade/agentcraft
+git clone https://github.com/elliotnex/agentcraft
 cd agentcraft
 
 tools\launch.ps1 -Backend sim                    # try it first: a simulated team, no API usage
@@ -218,6 +300,18 @@ the first time; in an older world, rebuild it with `/agentcraft hq`.
 > running AgentCraft yourself. To make it permanent for yourself, put
 > `{"claude": {"useClaudeLogin": true}}` in `~/.agentcraft/config.json`.
 
+**More hubs and the freelancer.** To let the game start each hub's Foreman for you, add to
+`~/.agentcraft/config.json`:
+
+```json
+{ "hubs": { "autoStart": true, "checkout": "C:/path/to/agentcraft" } }
+```
+
+Then press <kbd>H</kbd> → **New hub**. For Scout, set `OPENROUTER_API_KEY` (or point
+`{"open": {"baseUrl": "http://localhost:11434/v1"}}` at a local Ollama), run `/ac hub paths` once to
+build the pavilion, and right-click its terminal. You can also run the freelancer on its own with
+`tools\launch.ps1 -Backend open -Profile freelance -NoGame`.
+
 **Your name.** The agents call you by your OS user name. Change it with
 `-ForemanArgs '--user-name','Sam'`, `AGENTCRAFT_USER_NAME`, or `{"userName": "Sam"}` in
 `~/.agentcraft/config.json`.
@@ -235,6 +329,9 @@ in `~/.agentcraft/config.json` (or `-ForemanArgs '--account-label','My studio'`)
 |---|---|
 | <kbd>`</kbd> | Open the **console** |
 | <kbd>J</kbd> | **Answer decisions**: questions, permission prompts and merges, oldest first |
+| <kbd>H</kbd> | **Hubs overview**: Go, Answer, Settings; <kbd>N</kbd> for a new hub |
+| Right click the **Wayfinder** | Teleport to the plaza, any hub, or any studio station |
+| Right click the pavilion's terminal | **The freelancer**: model, repository, task or question |
 | <kbd>Enter</kbd> on a terminal block | Open the console |
 | Right click an agent | Agent card: state, task, recent log, message, pause, stop |
 | Right click the podium, merge station, archive or a task card | Decisions, diff review, memory library, task details |
@@ -251,7 +348,12 @@ All keys can be rebound in Options, Controls.
 | `/pause @x`, `/resume @x` | Pause an agent, keeping its task |
 | `/stop @x`, `/spawn @x [task]` | Take an agent off shift, or bring one on |
 | `/repo add <path>`, `/repos` | Register and list repos |
+| `/hub [name]`, `/hubs` | Talk to another hub from here; list hubs |
 | `/help` | Everything else |
+
+**Hub commands** (chat, <kbd>T</kbd>): `/ac hub list`, `/ac hub create <id> [name]`, `/ac hub tp <id>`,
+`/ac hub theme <id> <theme>`, `/ac hub build <id>`, `/ac hub paths` (roads, plaza and pavilion),
+`/ac wayfinder`.
 
 <br>
 
@@ -280,6 +382,9 @@ flowchart LR
   back what you decide. If the game closes, no work is lost.
 - **The sim backend** is a scripted team that exercises every feature with real git edits. It powers
   the demo, the screenshot QA and development, without any API usage.
+- **One Foreman per hub.** Each hub's project runs in its own Foreman profile and port; the mod keeps
+  a link to every hub and shows the one you stand in. The freelancer is a Foreman on the **open
+  backend**: any OpenAI-compatible model through one tool-calling loop.
 
 <details>
 <summary><b>More on the Foreman</b></summary>
@@ -321,7 +426,7 @@ the workers resolved, took 2 to 10 minutes each and about $6 in total. The sim b
 
 | Path | What lives there |
 |---|---|
-| [`foreman/`](foreman) | The orchestrator: agents, task graph, memory, decisions, git safety, 482 tests |
+| [`foreman/`](foreman) | The orchestrator: agents (Claude team and the open freelancer), task graph, memory, decisions, git safety, 530+ tests |
 | [`mod/`](mod) | The Fabric mod: HQ builder, agents, displays, screens, HUD |
 | [`assets-src/`](assets-src) | Scripts that generate every skin, block texture and UI sprite |
 | [`tools/`](tools) | Launcher, stop script, DevBridge CLI, screenshot and QA runner |
@@ -332,7 +437,7 @@ the workers resolved, took 2 to 10 minutes each and about $6 in total. The sim b
 ## Development
 
 ```powershell
-cd foreman; npm test                       # 482 tests
+cd foreman; npm test                       # 530+ tests
 cd mod; .\gradlew.bat build                # the mod
 node tools/qa.mjs --home .agentcraft-home  # capture the 10 shot QA gallery
 ```
@@ -351,7 +456,8 @@ AgentCraft is young and has been used by one person on one machine. Today it is:
 
 - **Windows and macOS development launchers.** Both platforms have desktop notifications when
   the agents need a decision. macOS has been tested on Apple Silicon; Intel Macs are not yet tested.
-- **Singleplayer,** one studio per world, on **Minecraft 26.3**.
+- **Singleplayer,** with as many hubs (projects) per world as the town has spots, on **Minecraft 26.3**.
+  Starting hub Foremen from the game is Windows-only for now.
 - **Run through the development client** (`gradlew runClient`). A regular mod release for normal
   launchers is planned.
 
