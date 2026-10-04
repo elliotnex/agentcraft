@@ -271,6 +271,45 @@ final class CompassNetwork {
 		}
 		// the hub wall, between the fountain and the south road, looking north at the fountain
 		NetworkBuilder.hubWall(p, CX, CZ + 22, Math.max(1, hubCount));
+		// help boards on the other three sides, facing the fountain: keys, console, hubs and town
+		kiosk(p, CX, CZ - 22, Direction.SOUTH, 13, 4, "help:keys");
+		kiosk(p, CX - 22, CZ, Direction.EAST, 13, 4, "help:console");
+		kiosk(p, CX + 22, CZ, Direction.WEST, 13, 4, "help:hubs");
+	}
+
+	/**
+	 * A free-standing board {@code w} x {@code h} blocks centred on (cx, cz), facing {@code facing},
+	 * bound to {@code binding} (the client draws it), in a stone-brick frame with a slab hood, a solid
+	 * back and a lantern post either side.
+	 */
+	static void kiosk(Plan p, int cx, int cz, Direction facing, int w, int h, String binding) {
+		Direction along = facing.getClockWise();
+		int ax = along.getStepX(), az = along.getStepZ();
+		int bxo = -facing.getStepX(), bzo = -facing.getStepZ();
+		int sx = cx - ax * (w / 2), sz = cz - az * (w / 2);
+		int y0 = GROUND + 2, y1 = y0 + h - 1;
+		BlockState board = dev.agentcraft.block.ModBlocks.TASK_BOARD.defaultBlockState().setValue(dev.agentcraft.block.PanelBlock.FACING, facing);
+		for (int i = -1; i <= w; i++) {
+			int x = sx + ax * i, z = sz + az * i;
+			for (int y = GROUND + 1; y <= y1 + 1; y++) {
+				p.set(x + bxo, y, z + bzo, STONE);
+				boolean frame = i == -1 || i == w || y == GROUND + 1 || y == y1 + 1;
+				if (frame) {
+					p.set(x, y, z, y == GROUND + 1 ? CHISELED : STONE);
+				}
+			}
+			p.set(x, y1 + 2, z, St.slab(Blocks.STONE_BRICK_SLAB, false));
+			p.set(x + bxo, y1 + 2, z + bzo, STONE);
+		}
+		for (int i = 0; i < w; i++) {
+			int x = sx + ax * i, z = sz + az * i;
+			for (int y = y0; y <= y1; y++) {
+				p.set(x, y, z, board);
+				p.bind(x, y, z, binding);
+			}
+		}
+		NetworkBuilder.post(p, sx - ax * 3, sz - az * 3);
+		NetworkBuilder.post(p, sx + ax * (w + 2), sz + az * (w + 2));
 	}
 
 	/**

@@ -66,6 +66,8 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		String noDataText = "";
 		/** Bound to "hubs": the hub wall ({@link HubWall}) instead of the task kanban. */
 		boolean hubs;
+		/** Bound to "help:<page>": a help board ({@link HelpBoard}); null otherwise. */
+		@Nullable String help;
 	}
 
 	private static final List<TaskBoard.Card> STATIC = new ArrayList<>();
@@ -96,9 +98,10 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		TaskBoard b = TaskWallFeature.board(be.getBlockPos());
 		b.lastUsedNanos = now;
 		s.hubs = HubWall.BINDING.equals(be.binding());
-		b.forcedPpb = s.hubs ? HubWall.PPB : 0;
-		// the hub wall only borrows the board's geometry (no task cards)
-		ForemanState cards = s.hubs ? null : fs != null && fs.hasData() ? fs : null;
+		s.help = be.binding().startsWith(HelpBoard.PREFIX) ? be.binding().substring(HelpBoard.PREFIX.length()) : null;
+		b.forcedPpb = s.hubs || s.help != null ? HubWall.PPB : 0;
+		// the hub wall and help boards only borrow the board's geometry (no task cards)
+		ForemanState cards = s.hubs || s.help != null ? null : fs != null && fs.hasData() ? fs : null;
 		if (b.sync(cards, s.panelWidth, s.panelHeight, TaskWallFeature.taskSeq(), TaskWallFeature.agentSeq(), now)) {
 			DisplayStats.rebuilt(DisplayStats.Kind.BOARD);
 		}
@@ -158,9 +161,13 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		toFace(ps, s.facing, LINEN_DEPTH, b.ppb);
 		ps.translate(0, -(s.panelHeight - 1) * b.ppb, 0);
 		int light = s.light;
-		if (s.hubs) {
+		if (s.hubs || s.help != null) {
 			drawTiled(ps, c, b, SURFACE, light);
-			HubWall.draw(ps, c, b, light);
+			if (s.hubs) {
+				HubWall.draw(ps, c, b, light);
+			} else {
+				HelpBoard.draw(ps, c, b, light, s.help);
+			}
 			ps.popPose();
 			DisplayStats.add(DisplayStats.Kind.BOARD, System.nanoTime() - t0);
 			return;

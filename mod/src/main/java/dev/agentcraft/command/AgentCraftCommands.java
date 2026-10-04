@@ -18,7 +18,7 @@ import net.minecraft.network.chat.Component;
  * <pre>
  * AgentCraftCommands.sub(root -> root.then(Commands.literal("hq").executes(ctx -> ...)));
  * </pre>
- * Built in: {@code /agentcraft anchors} lists the published anchors.
+ * Built in: {@code /agentcraft anchors} lists the published anchors. {@code /ac} is an alias for the whole tree.
  */
 public final class AgentCraftCommands {
 	private static final List<Consumer<LiteralArgumentBuilder<CommandSourceStack>>> SUBS = new CopyOnWriteArrayList<>();
@@ -46,7 +46,9 @@ public final class AgentCraftCommands {
 			for (var s : SUBS) {
 				s.accept(root);
 			}
-			dispatcher.register(root);
+			var node = dispatcher.register(root);
+			// /ac: a short alias for every /agentcraft command (/ac hub tp bob)
+			dispatcher.register(Commands.literal("ac").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).redirect(node));
 		});
 	}
 }

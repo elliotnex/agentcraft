@@ -100,6 +100,9 @@ public final class TaskWallFeature {
 				mc.gui.setScreen(new dev.agentcraft.client.hubs.HubsScreen());
 				return;
 			}
+			if (be.binding().startsWith(HelpBoard.PREFIX)) {
+				return; // a help board: nothing to click
+			}
 			HitResult hr = mc.hitResult;
 			Vec3 hit = hr instanceof BlockHitResult bh && hr.getType() == HitResult.Type.BLOCK ? bh.getLocation() : Vec3.atCenterOf(pos);
 			String id = taskAt(pos, state, hit);
