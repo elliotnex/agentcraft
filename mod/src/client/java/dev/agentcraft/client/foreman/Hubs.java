@@ -34,9 +34,19 @@ public final class Hubs {
 		void onChange(Hub hub, ForemanState state);
 	}
 
+	/** Events of every hub, with the hub they came from (the active one included). Client thread. */
+	public interface HubEventListener {
+		default void onNotify(Hub hub, Notify notify) {
+		}
+
+		default void onDecision(Hub hub, @Nullable Decision previous, Decision decision) {
+		}
+	}
+
 	private static final Map<String, Hub> HUBS = new LinkedHashMap<>();
 	private static final List<ForemanListener> ACTIVE_LISTENERS = new CopyOnWriteArrayList<>();
 	private static final List<AllHubsListener> ALL_LISTENERS = new CopyOnWriteArrayList<>();
+	private static final List<HubEventListener> EVENT_LISTENERS = new CopyOnWriteArrayList<>();
 	private static final List<Consumer<Hub>> SWITCH_LISTENERS = new CopyOnWriteArrayList<>();
 	private static @Nullable Hub active;
 	private static String modVersion = "0";
@@ -128,6 +138,21 @@ public final class Hubs {
 		ALL_LISTENERS.add(l);
 	}
 
+	public static void addHubEventListener(HubEventListener l) {
+		EVENT_LISTENERS.add(l);
+	}
+
+	/** Open decisions of every hub except the active one. */
+	public static int openDecisionsElsewhere() {
+		int n = 0;
+		for (Hub h : all()) {
+			if (h != active && h.connected()) {
+				n += h.state().openDecisions().size();
+			}
+		}
+		return n;
+	}
+
 	/** Called after the active hub changed. */
 	public static void addSwitchListener(Consumer<Hub> l) {
 		SWITCH_LISTENERS.add(l);
@@ -189,6 +214,13 @@ public final class Hubs {
 		@Override
 		public void onDecision(@Nullable Decision previous, Decision decision) {
 			each(l -> l.onDecision(previous, decision));
+			for (HubEventListener l : EVENT_LISTENERS) {
+				try {
+					l.onDecision(hub, previous, decision);
+				} catch (Throwable t) {
+					AgentCraft.LOGGER.warn("hub event listener {} failed", l.getClass().getName(), t);
+				}
+			}
 		}
 
 		@Override
@@ -224,6 +256,13 @@ public final class Hubs {
 		@Override
 		public void onNotify(Notify notify) {
 			each(l -> l.onNotify(notify));
+			for (HubEventListener l : EVENT_LISTENERS) {
+				try {
+					l.onNotify(hub, notify);
+				} catch (Throwable t) {
+					AgentCraft.LOGGER.warn("hub event listener {} failed", l.getClass().getName(), t);
+				}
+			}
 		}
 
 		@Override

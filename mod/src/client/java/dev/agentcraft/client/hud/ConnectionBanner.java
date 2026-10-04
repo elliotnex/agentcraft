@@ -71,7 +71,13 @@ public final class ConnectionBanner implements HudElement {
 			if (fs != null && fs.backend() == BackendName.CLAUDE && fs.account() != null) {
 				detail = fs.account();
 			}
-			if (now - link.sinceMs() > FADE_AFTER_MS) {
+			int elsewhere = dev.agentcraft.client.foreman.Hubs.openDecisionsElsewhere();
+			if (elsewhere > 0) {
+				String key = Keys.hubs == null ? "H" : Keys.label(Keys.hubs);
+				String tally = elsewhere + (elsewhere == 1 ? " decision" : " decisions") + " waiting in other hubs (" + key + ")";
+				detail = detail == null ? tally : detail + " · " + tally;
+			}
+			if (now - link.sinceMs() > FADE_AFTER_MS && elsewhere == 0) {
 				alpha = 150;
 			}
 		} else if (link.everSynced()) {

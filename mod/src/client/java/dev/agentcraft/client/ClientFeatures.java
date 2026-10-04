@@ -40,6 +40,7 @@ public final class ClientFeatures {
 		DiffFeature.init();
 		LibraryFeature.init();
 		PermissionsFeature.init();
+		dev.agentcraft.client.hubs.HubsFeature.init();   // hubs overview (H), travel, cross-hub answers
 		AgentCraft.LOGGER.info("AgentCraft client features initialised");
 	}
 }

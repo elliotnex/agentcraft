@@ -3,6 +3,8 @@ package dev.agentcraft.client.hud;
 import dev.agentcraft.client.decisions.DecisionScreen;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanListener;
+import dev.agentcraft.client.foreman.Hub;
+import dev.agentcraft.client.foreman.Hubs;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.Decision;
@@ -29,6 +31,9 @@ import org.jspecify.annotations.Nullable;
  * about, two lines of text; "need you" toasts get a clay stripe and the decisions key hint. They slide
  * in at the top right under the connection pill, stack (newest on top, three at most), and leave
  * early once their decision is answered. Not shown while the decision screen is open.
+ *
+ * <p>With several hubs, another hub's "need you" and warning toasts show too, named after their hub
+ * ("Marlow needs you · webv3") and pointing at the hubs overview instead of the decisions key.
  */
 public final class Toasts implements HudElement {
 	private static final int W = 196;
@@ -38,7 +43,9 @@ public final class Toasts implements HudElement {
 	private static final List<Toast> ACTIVE = new ArrayList<>();
 	private static int shown;
 
-	private record Toast(Notify n, @Nullable String agentId, String title, String body, long start, long life, @Nullable String decisionId) {
+	/** {@code hub}: the hub it came from (decision ids repeat across hubs). */
+	private record Toast(Notify n, @Nullable String agentId, String title, String body, long start, long life, @Nullable String decisionId,
+		String hub) {
 	}
 
 	public static void init() {
@@ -47,11 +54,20 @@ public final class Toasts implements HudElement {
 			public void onNotify(Notify n) {
 				push(n);
 			}
+		});
+		Hubs.addHubEventListener(new Hubs.HubEventListener() {
+			@Override
+			public void onNotify(Hub hub, Notify n) {
+				// the active hub's notifies arrive through the listener above
+				if (hub != Hubs.active() && (n.level() == NotifyLevel.NEED_USER || n.level() == NotifyLevel.WARN)) {
+					push(hub, n, true);
+				}
+			}
 
 			@Override
-			public void onDecision(@Nullable Decision previous, Decision decision) {
+			public void onDecision(Hub hub, @Nullable Decision previous, Decision decision) {
 				if (!decision.isOpen()) {
-					expireFor(decision.id());
+					expireFor(hub.id(), decision.id());
 				}
 			}
 		});
@@ -65,9 +81,13 @@ public final class Toasts implements HudElement {
 		return ACTIVE.size();
 	}
 
-	/** Add a toast for a notify (client thread). */
+	/** Add a toast for a notify of the active hub (client thread). */
 	public static void push(Notify n) {
-		ForemanState s = Foreman.state();
+		push(Foreman.hub(), n, false);
+	}
+
+	private static void push(Hub hub, Notify n, boolean elsewhere) {
+		ForemanState s = hub.state();
 		String agentId = null;
 		String body = n.text();
 		if (n.decisionId() != null && s != null && s.decision(n.decisionId()) != null) {
@@ -90,25 +110,28 @@ public final class Toasts implements HudElement {
 			case WARN -> agentId != null ? UiBits.agentName(agentId) : "Heads up";
 			default -> agentId != null ? UiBits.agentName(agentId) : "Foreman";
 		};
+		if (elsewhere) {
+			title += " · " + hub.name();
+		}
 		long life = switch (n.level()) {
 			case NEED_USER -> 9000;
 			case WARN -> 8000;
 			default -> 5500;
 		};
-		ACTIVE.add(0, new Toast(n, agentId, title, body, Util.getMillis(), life, n.decisionId()));
+		ACTIVE.add(0, new Toast(n, agentId, title, body, Util.getMillis(), life, n.decisionId(), hub.id()));
 		while (ACTIVE.size() > MAX) {
 			ACTIVE.remove(ACTIVE.size() - 1);
 		}
 		shown++;
 	}
 
-	private static void expireFor(String decisionId) {
+	private static void expireFor(String hub, String decisionId) {
 		long now = Util.getMillis();
 		for (int i = 0; i < ACTIVE.size(); i++) {
 			Toast t = ACTIVE.get(i);
-			if (decisionId.equals(t.decisionId())) {
+			if (decisionId.equals(t.decisionId()) && hub.equals(t.hub())) {
 				long end = Math.min(t.start() + t.life(), now + FADE_MS);
-				ACTIVE.set(i, new Toast(t.n(), t.agentId(), t.title(), t.body(), t.start(), Math.max(0, end - t.start()), t.decisionId()));
+				ACTIVE.set(i, new Toast(t.n(), t.agentId(), t.title(), t.body(), t.start(), Math.max(0, end - t.start()), t.decisionId(), t.hub()));
 			}
 		}
 	}
@@ -185,9 +208,12 @@ public final class Toasts implements HudElement {
 			ly += 10;
 		}
 		if (need && a > 200) {
-			String key = Keys.decisions == null ? "J" : Keys.label(Keys.decisions);
-			int hw = UiBits.hintsWidth(font, key, "answer");
-			UiBits.hints(g, font, x + W - p.right() - hw, ly, false, key, "answer");
+			// another hub's decision: the decisions key answers the hub you are in, the overview gets you there
+			boolean here = t.hub().equals(Foreman.hub().id());
+			String key = here ? Keys.decisions == null ? "J" : Keys.label(Keys.decisions) : Keys.hubs == null ? "H" : Keys.label(Keys.hubs);
+			String verb = here ? "answer" : "hubs";
+			int hw = UiBits.hintsWidth(font, key, verb);
+			UiBits.hints(g, font, x + W - p.right() - hw, ly, false, key, verb);
 		}
 		return h;
 	}

@@ -15,6 +15,7 @@ public final class Keys {
 	public static KeyMapping console;
 	public static KeyMapping terminal;
 	public static KeyMapping decisions;
+	public static KeyMapping hubs;
 	private static boolean registered;
 
 	private Keys() {
@@ -38,6 +39,7 @@ public final class Keys {
 			InputConstants.KEY_RETURN, cat, 2));
 		decisions = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.agentcraft.decisions", InputConstants.Type.KEYBOARD, InputConstants.KEY_J, cat,
 			3));
+		hubs = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.agentcraft.hubs", InputConstants.Type.KEYBOARD, InputConstants.KEY_H, cat, 4));
 	}
 
 	/**

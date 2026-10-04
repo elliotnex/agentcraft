@@ -97,12 +97,22 @@ public final class ForemanFeature {
 		}
 		// Video choreography (always available): inject messages as if the Foreman sent them, hold the live stream.
 		DevBridge.register("dev.foreman.inject", 5_000,
-			"{message:{type,...}} | {patch:{agent|task:id, set:{field:value...}}} | {say:{agent, text, to?}} - apply to the mod's Foreman"
+			"{message:{type,...}} | {patch:{agent|task:id, set:{field:value...}}} | {say:{agent, text, to?}}, hub? - apply to the mod's Foreman"
 				+ " model as if received (bypasses the hold queue); patch copies the current agent/task and replaces a few wire fields",
 			(req, mc) -> {
 				Fields f = Fields.of(req);
 				JsonObject msg = injectMessage(f);
-				return DevBridge.onClient(mc, () -> applyInjected(msg));
+				String hubId = f.optStr("hub", null);
+				return DevBridge.onClient(mc, () -> {
+					if (hubId == null) {
+						return applyInjected(msg);
+					}
+					Hub hub = Hubs.get(hubId);
+					if (hub == null) {
+						throw new DevBridge.DevException("no hub '" + hubId + "'");
+					}
+					return applyInjected(msg, hub.state());
+				});
 			});
 		DevBridge.register("dev.foreman.hold", 10_000,
 			"{on:bool, release?:reconnect|replay|drop} - hold live Foreman messages (queued, not applied) so a shot shows only what it"
@@ -189,7 +199,11 @@ public final class ForemanFeature {
 
 	/** Applies a validated injection (see {@link #injectMessage}). Client thread. */
 	public static JsonObject applyInjected(JsonObject inj) {
-		ForemanState st = Foreman.state();
+		return applyInjected(inj, Foreman.state());
+	}
+
+	/** Applies a validated injection to one hub's model (the "hub" field of dev.foreman.inject). Client thread. */
+	public static JsonObject applyInjected(JsonObject inj, ForemanState st) {
 		JsonObject o = new JsonObject();
 		if (inj.get("kind").getAsString().equals("patch")) {
 			try {
