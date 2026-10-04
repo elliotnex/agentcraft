@@ -221,10 +221,13 @@ public class HubsScreen extends Screen {
 		if (event.button() == 0) {
 			for (Btn b : List.copyOf(buttons)) {
 				if (b.hit(event.x(), event.y())) {
+					dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: click {} {} hit {} '{}'", (int) event.x(), (int) event.y(), b.action(), b.hub());
 					press(b.action(), b.hub());
 					return true;
 				}
 			}
+			dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: click {} {} hit no button ({} buttons: {})", (int) event.x(), (int) event.y(), buttons.size(),
+				buttons.stream().map(b -> b.action() + ":" + b.hub() + "@" + b.x() + "," + b.y() + "+" + b.w()).toList());
 		}
 		return super.mouseClicked(event, doubleClick);
 	}

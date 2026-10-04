@@ -85,20 +85,34 @@ public final class HubsFeature {
 		}
 		Anchor spawn = Anchors.of(hub.id()).get(AnchorNames.SPAWN);
 		if (spawn == null) {
-			mc.player.sendSystemMessage(Component.literal("Hub '" + hub.id() + "' has no studio yet: /agentcraft hub build " + hub.id()));
+			dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: '{}' has no spawn anchor (studio not built)", hub.id());
+			mc.player.sendSystemMessage(Component.literal("Hub '" + hub.id() + "' has no studio yet: /ac hub build " + hub.id()));
 			return;
 		}
 		answerOnArrival = answer ? hub.id() : null;
 		MinecraftServer server = mc.getSingleplayerServer();
+		mc.player.sendSystemMessage(Component.literal("Travelling to " + hub.name() + "..."));
+		dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: travelling to '{}' at {} {} {} (singleplayer server: {})", hub.id(), spawn.x(), spawn.y(),
+			spawn.z(), server != null);
 		if (server == null) {
 			mc.player.connection.sendCommand("agentcraft hub tp " + hub.id());
 			return;
 		}
 		UUID who = mc.player.getUUID();
+		String name = hub.name();
 		server.execute(() -> {
 			ServerPlayer p = server.getPlayerList().getPlayer(who);
-			if (p != null) {
-				p.teleportTo(server.overworld(), spawn.x(), spawn.y(), spawn.z(), Set.of(), spawn.yaw(), 0f, true);
+			if (p == null) {
+				dev.agentcraft.AgentCraft.LOGGER.warn("Hubs overview: no server player {} to teleport", who);
+				return;
+			}
+			boolean ok = p.teleportTo(server.overworld(), spawn.x(), spawn.y(), spawn.z(), Set.of(), spawn.yaw(), 0f, true);
+			dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: teleport to '{}' {} (player now at {} {} {})", name, ok ? "done" : "REFUSED", p.getX(),
+				p.getY(), p.getZ());
+			if (!ok) {
+				// the plain /tp path as a fallback, with the player's own permission
+				server.getCommands().performPrefixedCommand(p.createCommandSourceStack(), String.format(java.util.Locale.ROOT, "tp @s %.2f %.2f %.2f %.1f 0",
+					spawn.x(), spawn.y(), spawn.z(), spawn.yaw()));
 			}
 		});
 	}
