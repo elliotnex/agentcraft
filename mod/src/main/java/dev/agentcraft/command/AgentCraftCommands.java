@@ -31,6 +31,13 @@ public final class AgentCraftCommands {
 	}
 
 	public static void init() {
+		// /ac wayfinder: the teleport-menu item (everyone gets one on their first visit)
+		sub(root -> root.then(Commands.literal("wayfinder").executes(ctx -> {
+			var player = ctx.getSource().getPlayerOrException();
+			dev.agentcraft.world.HqWorld.giveWayfinder(player, true);
+			ctx.getSource().sendSuccess(() -> net.minecraft.network.chat.Component.literal("Here's a Wayfinder: right-click it to teleport anywhere in the town"), false);
+			return 1;
+		})));
 		sub(root -> root.then(Commands.literal("anchors").executes(ctx -> {
 			Anchors.Layout layout = Anchors.current();
 			ctx.getSource().sendSuccess(() -> Component.literal("Layout '" + layout.name() + "' rev " + layout.revision() + ": "

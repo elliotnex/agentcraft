@@ -42,7 +42,18 @@ public final class HqWorld {
 			if (player.gameMode() == GameType.SPECTATOR || player.gameMode() == GameType.SURVIVAL) {
 				player.setGameMode(GameType.CREATIVE);
 			}
+			giveWayfinder(player, false);
 		});
+	}
+
+	/** The Wayfinder (teleport menu): once per player on their first visit, or always when {@code force}. */
+	public static boolean giveWayfinder(ServerPlayer player, boolean force) {
+		String tag = "agentcraft.wayfinder";
+		if (!force && player.entityTags().contains(tag)) {
+			return false;
+		}
+		player.addTag(tag);
+		return player.getInventory().add(new net.minecraft.world.item.ItemStack(dev.agentcraft.block.ModItems.WAYFINDER));
 	}
 
 	public static boolean isHq(MinecraftServer server) {

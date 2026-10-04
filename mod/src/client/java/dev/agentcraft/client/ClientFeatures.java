@@ -42,6 +42,7 @@ public final class ClientFeatures {
 		PermissionsFeature.init();
 		dev.agentcraft.client.hubs.HubsFeature.init();   // hubs overview (H), travel, cross-hub answers
 		dev.agentcraft.client.freelance.FreelanceFeature.init(); // the plaza pavilion: Scout on any model
+		dev.agentcraft.client.wayfinder.WayfinderFeature.init(); // the Wayfinder item: teleport menu
 		AgentCraft.LOGGER.info("AgentCraft client features initialised");
 	}
 }

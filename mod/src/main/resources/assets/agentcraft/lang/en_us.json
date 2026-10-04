@@ -36,5 +36,6 @@
   "key.agentcraft.console": "Open the console",
   "key.agentcraft.console_terminal": "Console (looking at a terminal)",
   "key.agentcraft.decisions": "Answer decisions",
-  "key.agentcraft.hubs": "Hubs overview"
+  "key.agentcraft.hubs": "Hubs overview",
+  "item.agentcraft.wayfinder": "Wayfinder"
 }

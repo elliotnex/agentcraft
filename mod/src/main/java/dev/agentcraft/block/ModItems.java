@@ -15,15 +15,20 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 
-/** One block item per AgentCraft block, plus the "AgentCraft" creative tab (itemGroup.agentcraft). */
+/** One block item per AgentCraft block, the Wayfinder, and the "AgentCraft" creative tab (itemGroup.agentcraft). */
 public final class ModItems {
 	private static final List<Item> ITEMS = new ArrayList<>();
+	/** The Wayfinder: right-click opens the teleport menu (client: WayfinderFeature). */
+	public static Item WAYFINDER;
 	public static final ResourceKey<CreativeModeTab> TAB = ResourceKey.create(Registries.CREATIVE_MODE_TAB, AgentCraft.id("agentcraft"));
 
 	private ModItems() {
 	}
 
 	public static void init() {
+		ResourceKey<Item> wk = ResourceKey.create(Registries.ITEM, AgentCraft.id("wayfinder"));
+		WAYFINDER = Registry.register(BuiltInRegistries.ITEM, wk, new Item(new Item.Properties().setId(wk).stacksTo(1)));
+		ITEMS.add(WAYFINDER);
 		for (Block block : ModBlocks.all()) {
 			ResourceKey<Item> key = ResourceKey.create(Registries.ITEM, BuiltInRegistries.BLOCK.getKey(block));
 			BlockItem item = new BlockItem(block, new Item.Properties().setId(key).useBlockDescriptionPrefix());
