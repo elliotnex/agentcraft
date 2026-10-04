@@ -108,3 +108,16 @@ describe('auto-approve', () => {
     expect(loadConfig(['--home', home], {}).claude.autoApprove).toBe('off');
   });
 });
+
+describe('foreman.status profile', () => {
+  it('reports the profile it runs, so a hub can tell it reached the right project', async () => {
+    const { makeForeman } = await import('./helpers.js');
+    home = tempDir();
+    const h = makeForeman(home, ['--profile', 'webv3']);
+    try {
+      expect(h.fm.status.profile).toBe('webv3');
+    } finally {
+      await h.fm.close();
+    }
+  });
+});

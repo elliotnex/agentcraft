@@ -36,7 +36,11 @@ public final class HubRegistry {
 	public static final String MAIN = "main";
 	/** Distance between two hubs' origins along +X (the studio site is 93 blocks wide). */
 	public static final int SPACING = 160;
-	/** Hub ports: {@code PORT_BASE + slot} (the main hub uses the client's AGENTCRAFT_PORT, default 7878). */
+	/**
+	 * Fallback hub port for a hub record without one: {@code PORT_BASE + slot}. New hubs get the port
+	 * their project owns on this machine ({@link HubProfiles#portFor}); the main hub uses the client's
+	 * AGENTCRAFT_PORT (default 7878).
+	 */
 	public static final int PORT_BASE = 7900;
 	private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9_-]{0,31}");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
@@ -111,7 +115,12 @@ public final class HubRegistry {
 			throw new IllegalArgumentException("hub '" + key + "' already exists");
 		}
 		int slot = hubs.stream().mapToInt(Hub::slot).max().orElse(0) + 1;
-		Hub hub = new Hub(key, name.isBlank() ? key : name, slot, PORT_BASE + slot);
+		// the port belongs to the project (profile), machine-wide: another world's hub never shares it
+		String profile = HubProfiles.profileFor(key);
+		java.util.Set<Integer> inWorld = new java.util.HashSet<>();
+		hubs.forEach(h -> inWorld.add(h.port()));
+		int port = HubProfiles.portFor(profile == null ? key : profile, inWorld);
+		Hub hub = new Hub(key, name.isBlank() ? key : name, slot, port);
 		List<Hub> next = new ArrayList<>(hubs);
 		next.add(hub);
 		set(List.copyOf(next));
@@ -172,6 +181,13 @@ public final class HubRegistry {
 			}
 		}
 		set(List.copyOf(list));
+		// hubs made before ports.json existed: their projects own the ports they already use
+		for (Hub h : list) {
+			String profile = HubProfiles.profileFor(h.id());
+			if (!h.isMain() && profile != null) {
+				HubProfiles.claim(profile, h.port());
+			}
+		}
 		AgentCraft.LOGGER.info("Hubs: {}", hubs.stream().map(Hub::id).toList());
 	}
 }

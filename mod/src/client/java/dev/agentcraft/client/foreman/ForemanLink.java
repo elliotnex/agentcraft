@@ -118,6 +118,33 @@ public final class ForemanLink {
 		io.shutdownNow();
 	}
 
+	/**
+	 * Drop the connection and stop retrying until {@link #release()}; unlike {@link #stop()} the link
+	 * can come back (a hub that reached another project's Foreman holds its link).
+	 */
+	public synchronized void hold(String reason) {
+		if (!running) {
+			return;
+		}
+		running = false;
+		generation.incrementAndGet();
+		WebSocket s = ws;
+		ws = null;
+		if (s != null) {
+			s.abort();
+		}
+		publish(status.with(Phase.WAITING_RETRY, reason, 0));
+	}
+
+	/** Connect again after {@link #hold}. */
+	public synchronized void release() {
+		if (running || sched.isShutdown() || status.phase() == Phase.DISABLED) {
+			return;
+		}
+		running = true;
+		sched.execute(this::connect);
+	}
+
 	/** Drop the current connection (if any) and connect again right away. */
 	public void reconnectNow() {
 		sched.execute(() -> {

@@ -49,6 +49,8 @@ public final class Hubs {
 	private static final List<HubEventListener> EVENT_LISTENERS = new CopyOnWriteArrayList<>();
 	private static final List<Consumer<Hub>> SWITCH_LISTENERS = new CopyOnWriteArrayList<>();
 	private static @Nullable Hub active;
+	/** hub id -> why its link is held (it reached another project's Foreman). */
+	private static final Map<String, String> MISMATCH = new java.util.concurrent.ConcurrentHashMap<>();
 	private static String modVersion = "0";
 	private static boolean started;
 
@@ -142,6 +144,44 @@ public final class Hubs {
 		EVENT_LISTENERS.add(l);
 	}
 
+	/** Why {@code hub}'s link is held (it reached another project's Foreman), or null. */
+	public static @Nullable String mismatch(Hub hub) {
+		return MISMATCH.get(hub.id());
+	}
+
+	/**
+	 * The Foreman a hub reached must run the hub's profile ({@link HubProfiles#profileFor}): ports used
+	 * to be 7900 + slot, so a hub in one world could reach another world's project on the same port.
+	 * On a mismatch the link is stopped and the model emptied; {@link #recheckMismatched} retries.
+	 */
+	private static void verify(Hub hub, ForemanState s) {
+		ForemanStatus st = s.status();
+		String actual = st == null ? null : st.profile();
+		String expected = dev.agentcraft.layout.HubProfiles.profileFor(hub.id());
+		if (actual == null || expected == null || expected.equals(actual)) {
+			if (actual != null) {
+				MISMATCH.remove(hub.id());
+			}
+			return;
+		}
+		String why = "port " + hub.port() + " is project '" + actual + "', not '" + expected + "'";
+		if (MISMATCH.put(hub.id(), why) == null) {
+			AgentCraft.LOGGER.warn("Hub '{}': {} - not connecting it", hub.id(), why);
+		}
+		hub.link().hold(why);
+		s.discard();
+	}
+
+	/** Gives held hubs another try (the other project's Foreman may have moved). Client thread. */
+	public static void recheckMismatched() {
+		for (String id : List.copyOf(MISMATCH.keySet())) {
+			Hub h = get(id);
+			if (h != null && started) {
+				h.link().release();
+			}
+		}
+	}
+
 	/** Open decisions of every hub except the active one. */
 	public static int openDecisionsElsewhere() {
 		int n = 0;
@@ -198,6 +238,9 @@ public final class Hubs {
 
 		@Override
 		public void onSnapshot(ForemanState state) {
+			if (state.hasData()) {
+				verify(hub, state);
+			}
 			each(l -> l.onSnapshot(state));
 		}
 
@@ -267,6 +310,7 @@ public final class Hubs {
 
 		@Override
 		public void onStatus(ForemanStatus status) {
+			verify(hub, hub.state());
 			each(l -> l.onStatus(status));
 		}
 

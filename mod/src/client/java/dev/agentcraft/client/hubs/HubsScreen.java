@@ -117,7 +117,8 @@ public class HubsScreen extends Screen {
 		Panels.text(g, font, num, x + 12, y + 1, muted);
 		int nx = x + 12 + font.width(num);
 		Panels.text(g, font, hub.name(), nx, y + 1, ink);
-		String sub = here ? "you are here" : !live ? "Foreman " + (hub.state().link().everSynced() ? "reconnecting" : "offline") : "";
+		String held = Hubs.mismatch(hub);
+		String sub = held != null ? held : here ? "you are here" : !live ? "Foreman " + (hub.state().link().everSynced() ? "reconnecting" : "offline") : "";
 		if (!s.repos().isEmpty() && live) {
 			var repo = goal != null && goal.repoId() != null && s.repos().containsKey(goal.repoId()) ? s.repos().get(goal.repoId())
 				: s.repos().values().iterator().next();

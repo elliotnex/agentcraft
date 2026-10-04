@@ -222,6 +222,7 @@ export const ForemanStatus = z.object({
   costUsd: z.number().optional().describe('claude: estimated spend of this profile (sum over all sessions, survives restarts)'),
   userName: z.string().optional().describe('the person the team works for, as the agents address them (UI: "<name> answered")'),
   autoApprove: AutoApprove.optional().describe('claude: permission prompts the Foreman answers itself (config claude.autoApprove)'),
+  profile: z.string().optional().describe('the state profile this Foreman runs (its project); a hub checks it reached the Foreman it expects'),
 });
 export type ForemanStatus = z.infer<typeof ForemanStatus>;
 

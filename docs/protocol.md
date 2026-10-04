@@ -185,6 +185,7 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `costUsd` | number | no | claude: estimated spend of this profile (sum over all sessions, survives restarts) |
 | `userName` | string | no | the person the team works for, as the agents address them (UI: "<name> answered") |
 | `autoApprove` | `off` \| `worktree` \| `network` \| `all` | no | claude: permission prompts the Foreman answers itself (config claude.autoApprove) |
+| `profile` | string | no | the state profile this Foreman runs (its project); a hub checks it reached the Foreman it expects |
 
 ### <a id="agentlogs"></a>AgentLogs
 

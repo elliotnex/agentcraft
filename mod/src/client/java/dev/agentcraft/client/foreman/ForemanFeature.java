@@ -253,6 +253,9 @@ public final class ForemanFeature {
 					ForemanStarter.maybeStart(h);
 				}
 			}
+			if (hubTick % 600 == 0) {
+				Hubs.recheckMismatched();
+			}
 		}
 		if (mc.player == null) {
 			return;

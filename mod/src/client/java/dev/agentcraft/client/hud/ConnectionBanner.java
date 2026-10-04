@@ -61,7 +61,12 @@ public final class ConnectionBanner implements HudElement {
 		String detail = null;
 		int alpha = 255;
 		boolean pulse = false;
-		if (link.phase() == Phase.DISABLED) {
+		String held = dev.agentcraft.client.foreman.Hubs.mismatch(dev.agentcraft.client.foreman.Foreman.hub());
+		if (held != null) {
+			dot = "error";
+			title = hubLabel() + "Wrong Foreman";
+			detail = held;
+		} else if (link.phase() == Phase.DISABLED) {
 			dot = "idle";
 			title = "Foreman link off";
 			detail = "AGENTCRAFT_FOREMAN=0";

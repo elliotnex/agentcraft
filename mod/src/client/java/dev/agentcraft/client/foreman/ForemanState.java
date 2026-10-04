@@ -206,6 +206,27 @@ public final class ForemanState {
 		return !link.synced();
 	}
 
+	/**
+	 * Forget the whole model, as if nothing was ever received (a hub that reached another project's
+	 * Foreman must not show its data). Listeners get an (empty) snapshot. Client thread.
+	 */
+	public void discard() {
+		agents.clear();
+		tasks.clear();
+		decisions.clear();
+		repos.clear();
+		memory.clear();
+		goals.clear();
+		logs.clear();
+		lastSay.clear();
+		feed.clear();
+		notifications.clear();
+		goal = null;
+		status = null;
+		snapshots = 0;
+		fire(l -> l.onSnapshot(this));
+	}
+
 	/** True once any snapshot was received (the model has real data). */
 	public boolean hasData() {
 		return snapshots > 0;

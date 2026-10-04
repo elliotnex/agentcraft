@@ -39,6 +39,9 @@ final class ForemanStarter {
 
 	/** Called for each hub that is not connected; starts its Foreman when configured and due. Client thread. */
 	static void maybeStart(Hub hub) {
+		if (Hubs.mismatch(hub) != null) {
+			return; // another project's Foreman holds the port
+		}
 		LinkStatus l = hub.state().link();
 		if (l.phase() != LinkStatus.Phase.WAITING_RETRY || l.attempt() < 2) {
 			return; // still connecting, or the first failure (it may just be starting)
@@ -62,7 +65,8 @@ final class ForemanStarter {
 			AgentCraft.LOGGER.warn("Hub '{}': no {} (check hubs.checkout in config.json)", hub.id(), launch);
 			return;
 		}
-		String profile = cfg.profiles.getOrDefault(hub.id(), hub.id().equals(Hub.MAIN) ? "claude" : hub.id());
+		String mapped = dev.agentcraft.layout.HubProfiles.profileFor(hub.id());
+		String profile = mapped != null ? mapped : "claude";
 		start(hub, launch, profile, cfg.claudeConfigDir);
 	}
 
