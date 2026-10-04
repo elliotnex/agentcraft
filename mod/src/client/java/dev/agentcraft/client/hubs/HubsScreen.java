@@ -84,7 +84,7 @@ public class HubsScreen extends Screen {
 		Panels.header(g, font, "Hubs  ·  " + hubs.size() + (waiting > 0 ? "  ·  " + waiting + " waiting on you" : ""), x, y, inner);
 		y += 14 + 8;
 		int listTop = y;
-		g.enableScissor(x - 2, listTop, x + inner + 2, listTop + listH);
+		g.enableScissor(x - 6, listTop, x + inner + 2, listTop + listH);
 		int i = 0;
 		for (Hub hub : hubs) {
 			int cy = listTop + i * CARD_H - scroll;
@@ -95,11 +95,10 @@ public class HubsScreen extends Screen {
 		}
 		g.disableScissor();
 		int fy = listTop + listH + 5;
-		Panels.text(g, font, "1-" + Math.min(9, hubs.size()) + " go to a hub   ·   /agentcraft hub create <id> adds one", x, fy, muted);
-		if (maxScroll > 0) {
-			String more = scroll < maxScroll ? "scroll for more" : "";
-			Panels.text(g, font, more, x + inner - font.width(more), fy, muted);
-		}
+		String keys = "1-" + Math.min(9, hubs.size()) + " go to a hub";
+		String tail = maxScroll > 0 ? scroll < maxScroll ? "scroll for more" : "" : "/agentcraft hub create <id> adds one";
+		Panels.text(g, font, keys, x, fy, muted);
+		Panels.text(g, font, tail, x + inner - font.width(tail), fy, muted);
 	}
 
 	private void card(GuiGraphicsExtractor g, Hub hub, int number, int x, int y, int w, int mx, int my, int clipTop, int clipBottom) {
@@ -110,6 +109,10 @@ public class HubsScreen extends Screen {
 		boolean live = hub.connected() && s.hasData();
 		Goal goal = live ? s.goal() : null;
 		int open = live ? s.openDecisions().size() : 0;
+		// ---- the hub's theme colour down the left edge
+		dev.agentcraft.layout.HubRegistry.Hub reg = dev.agentcraft.layout.HubRegistry.get(hub.id());
+		int accent = dev.agentcraft.hq.Theme.byId(reg == null ? null : reg.theme()).accent;
+		g.fill(x - 5, y - 1, x - 3, y + CARD_H - 12, accent);
 		// ---- name row
 		String family = !live ? "idle" : open > 0 ? "waiting" : goal != null && goal.progress() < 1 ? "working" : "done";
 		Panels.dot(g, family, x + 1, y + 2, false);

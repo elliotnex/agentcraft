@@ -45,8 +45,15 @@ public final class HubRegistry {
 	private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9_-]{0,31}");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
-	/** @param port 0 = the client's default Foreman port (main hub) */
-	public record Hub(String id, String name, int slot, int port) {
+	/**
+	 * @param port 0 = the client's default Foreman port (main hub)
+	 * @param theme the studio's look (dev.agentcraft.hq.Theme id), "warm" by default
+	 */
+	public record Hub(String id, String name, int slot, int port, String theme) {
+		public Hub withTheme(String t) {
+			return new Hub(id, name, slot, port, t);
+		}
+
 		public int originX() {
 			return slot * SPACING;
 		}
@@ -56,7 +63,7 @@ public final class HubRegistry {
 		}
 	}
 
-	private static final Hub MAIN_HUB = new Hub(MAIN, "Main", 0, 0);
+	private static final Hub MAIN_HUB = new Hub(MAIN, "Main", 0, 0, "warm");
 	private static volatile List<Hub> hubs = List.of(MAIN_HUB);
 	private static volatile long revision;
 
@@ -120,13 +127,33 @@ public final class HubRegistry {
 		java.util.Set<Integer> inWorld = new java.util.HashSet<>();
 		hubs.forEach(h -> inWorld.add(h.port()));
 		int port = HubProfiles.portFor(profile == null ? key : profile, inWorld);
-		Hub hub = new Hub(key, name.isBlank() ? key : name, slot, port);
+		Hub hub = new Hub(key, name.isBlank() ? key : name, slot, port, "warm");
 		List<Hub> next = new ArrayList<>(hubs);
 		next.add(hub);
 		set(List.copyOf(next));
 		save(server);
 		AgentCraft.LOGGER.info("Created hub '{}' in slot {} (x {}), Foreman port {}", hub.id(), slot, hub.originX(), hub.port());
 		return hub;
+	}
+
+	/** Changes a hub's theme and saves the list (rebuild its studio to see it). Server thread. */
+	public static Hub setTheme(MinecraftServer server, String id, String theme) {
+		List<Hub> next = new ArrayList<>();
+		Hub changed = null;
+		for (Hub h : hubs) {
+			if (h.id().equals(id)) {
+				changed = h.withTheme(theme);
+				next.add(changed);
+			} else {
+				next.add(h);
+			}
+		}
+		if (changed == null) {
+			throw new IllegalArgumentException("no hub '" + id + "'");
+		}
+		set(List.copyOf(next));
+		save(server);
+		return changed;
 	}
 
 	private static void set(List<Hub> list) {
@@ -146,6 +173,7 @@ public final class HubRegistry {
 			o.addProperty("name", h.name());
 			o.addProperty("slot", h.slot());
 			o.addProperty("port", h.port());
+			o.addProperty("theme", h.theme());
 			arr.add(o);
 		}
 		JsonObject root = new JsonObject();
@@ -170,11 +198,16 @@ public final class HubRegistry {
 				for (JsonElement e : root.getAsJsonArray("hubs")) {
 					JsonObject o = e.getAsJsonObject();
 					String id = o.get("id").getAsString();
-					if (id.equals(MAIN) || !validId(id)) {
+					String theme = o.has("theme") ? o.get("theme").getAsString() : "warm";
+					if (id.equals(MAIN)) {
+						list.set(0, MAIN_HUB.withTheme(theme));
+						continue;
+					}
+					if (!validId(id)) {
 						continue;
 					}
 					list.add(new Hub(id, o.has("name") ? o.get("name").getAsString() : id, o.get("slot").getAsInt(),
-						o.has("port") ? o.get("port").getAsInt() : PORT_BASE + o.get("slot").getAsInt()));
+						o.has("port") ? o.get("port").getAsInt() : PORT_BASE + o.get("slot").getAsInt(), theme));
 				}
 			} catch (IOException | RuntimeException e) {
 				AgentCraft.LOGGER.warn("Could not read {}; only the main hub is known", f, e);

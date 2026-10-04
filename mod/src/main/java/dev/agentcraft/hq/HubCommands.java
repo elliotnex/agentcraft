@@ -21,6 +21,8 @@ import net.minecraft.server.level.ServerPlayer;
  * /agentcraft hub create &lt;id&gt; [name]    new hub in the next slot: builds its studio and takes you there
  * /agentcraft hub tp &lt;id&gt;               go to a hub's entrance
  * /agentcraft hub build &lt;id&gt; [force]    (re)build a hub's studio
+ * /agentcraft hub theme &lt;id&gt; &lt;theme&gt;    give a hub's studio another look and rebuild it
+ *                                       (warm, cherry, birch, ember, midnight)
  * </pre>
  */
 final class HubCommands {
@@ -40,6 +42,15 @@ final class HubCommands {
 					HubRegistry.all().forEach(h -> b.suggest(h.id()));
 					return b.buildFuture();
 				}).executes(HubCommands::tp)))
+			.then(Commands.literal("theme")
+				.then(Commands.argument("id", StringArgumentType.word()).suggests((ctx, b) -> {
+					HubRegistry.all().forEach(h -> b.suggest(h.id()));
+					return b.buildFuture();
+				})
+					.then(Commands.argument("theme", StringArgumentType.word()).suggests((ctx, b) -> {
+						Theme.ALL.forEach(t -> b.suggest(t.id));
+						return b.buildFuture();
+					}).executes(HubCommands::theme))))
 			.then(Commands.literal("build")
 				.then(Commands.argument("id", StringArgumentType.word()).suggests((ctx, b) -> {
 					HubRegistry.all().forEach(h -> b.suggest(h.id()));
@@ -53,8 +64,8 @@ final class HubCommands {
 		for (HubRegistry.Hub h : HubRegistry.all()) {
 			boolean built = !Anchors.of(h.id()).isEmpty();
 			String port = h.port() == 0 ? "default port" : "port " + h.port();
-			ctx.getSource().sendSuccess(() -> Component.literal(String.format(Locale.ROOT, "%s \"%s\": slot %d (x %d), %s, %s", h.id(), h.name(),
-				h.slot(), h.originX(), port, built ? "built" : "not built")), false);
+			ctx.getSource().sendSuccess(() -> Component.literal(String.format(Locale.ROOT, "%s \"%s\": slot %d (x %d), %s, theme %s, %s", h.id(), h.name(),
+				h.slot(), h.originX(), port, Theme.byId(h.theme()).name, built ? "built" : "not built")), false);
 		}
 		return HubRegistry.all().size();
 	}
@@ -84,6 +95,26 @@ final class HubCommands {
 			return 0;
 		}
 		return teleport(ctx, hub);
+	}
+
+	private static int theme(CommandContext<CommandSourceStack> ctx) {
+		String id = StringArgumentType.getString(ctx, "id");
+		String themeId = StringArgumentType.getString(ctx, "theme");
+		Theme theme = Theme.find(themeId);
+		if (theme == null) {
+			ctx.getSource().sendFailure(Component.literal("Unknown theme '" + themeId + "' (known: "
+				+ Theme.ALL.stream().map(t -> t.id).toList() + ")"));
+			return 0;
+		}
+		HubRegistry.Hub hub;
+		try {
+			hub = HubRegistry.setTheme(ctx.getSource().getServer(), id, theme.id);
+		} catch (IllegalArgumentException e) {
+			ctx.getSource().sendFailure(Component.literal(e.getMessage()));
+			return 0;
+		}
+		ctx.getSource().sendSuccess(() -> Component.literal("Hub '" + hub.id() + "' is now " + theme.name + "; rebuilding its studio..."), true);
+		return buildHub(ctx, hub, false);
 	}
 
 	private static int build(CommandContext<CommandSourceStack> ctx, boolean force) {

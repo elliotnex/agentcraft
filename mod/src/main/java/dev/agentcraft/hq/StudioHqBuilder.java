@@ -161,6 +161,8 @@ public final class StudioHqBuilder implements HqBuilder {
 		long t0 = System.nanoTime();
 		Plan p = new Plan(SITE[0], SITE[1], SITE[2], SITE[3], SITE[4], SITE[5], GROUND, y -> y > GROUND ? AIR
 			: y == GROUND ? Blocks.GRASS_BLOCK.defaultBlockState() : y >= GROUND - 3 ? Blocks.DIRT.defaultBlockState() : Blocks.STONE.defaultBlockState());
+		dev.agentcraft.layout.HubRegistry.Hub hub = dev.agentcraft.layout.HubRegistry.get(a.hub());
+		p.theme(Theme.byId(hub == null ? null : hub.theme()));
 		long tPlan0 = System.nanoTime();
 		HqLandscape.ground(p);
 		hallShell(p);

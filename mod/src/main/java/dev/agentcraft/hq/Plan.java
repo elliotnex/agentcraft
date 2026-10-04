@@ -71,6 +71,8 @@ final class Plan {
 	private final BlockState[] cells;
 	private final int[] top;
 	private final Map<BlockPos, String> bindings = new LinkedHashMap<>();
+	/** Material swaps for the hub's look ({@link Theme}); WARM changes nothing. */
+	private Theme theme = Theme.WARM;
 
 	/**
 	 * @param changed cells written in the first pass; {@code connected}: cells whose connections
@@ -135,9 +137,13 @@ final class Plan {
 		return get(x, y, z).isAir();
 	}
 
+	void theme(Theme t) {
+		this.theme = t;
+	}
+
 	void set(int x, int y, int z, BlockState state) {
 		if (in(x, y, z)) {
-			cells[index(x, y, z)] = state;
+			cells[index(x, y, z)] = theme.apply(state);
 		}
 	}
 
