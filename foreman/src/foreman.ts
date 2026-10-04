@@ -28,6 +28,7 @@ import type {
   Station,
   Task,
 } from './protocol.js';
+import * as remote from './remote.js';
 import { RepoError, RepoManager } from './repos.js';
 import { Store } from './store.js';
 import { TaskError, TaskGraph } from './taskgraph.js';
@@ -402,6 +403,14 @@ export class Foreman {
         if (task) this.tasks.setStatus(task.id, 'done', { viaMerge: true, force: task.status !== 'review' });
         this.bus.feed('merge', `Merged ${res.branch} into ${res.base} (${res.sha}, ${res.files} file${res.files === 1 ? '' : 's'})`, { agentId: d.agentId });
         this.notify('info', `Merged ${res.branch} into ${res.base}`);
+        const repo = d.repoId ? this.repos.get(d.repoId) : undefined;
+        if (repo?.autoPush && repo.remote) {
+          // the user turned auto-push on for this repo: send the merge to origin
+          void this.repoGit(repo.id, 'push').catch((err: Error) => {
+            this.bus.feed('error', `Auto-push of ${repo.name} failed: ${err.message}`);
+            this.notify('warn', `Auto-push of ${repo.name} failed: ${truncate(err.message, 160)}`);
+          });
+        }
       } catch (e) {
         if (e instanceof RepoError && e.code === 'empty' && task && d.repoId && d.worktree) {
           // nothing to merge (a report or investigation): the task is simply done
@@ -547,7 +556,59 @@ export class Foreman {
         this.bus.feed('system', `Repo connected: ${r.name} (${r.branch})`);
         return { repoId: r.id };
       }
+      case 'repo.remove': {
+        const r = this.repos.require(msg.repoId);
+        const busy = this.tasks.list().filter((t) => t.repoId === r.id && (t.status === 'doing' || t.status === 'review'));
+        if (busy.length) throw new ClientError(`${r.name} has tasks in progress or in review (${busy.map((t) => t.id).join(', ')}): finish or cancel them first`);
+        const open = this.decisions.open().filter((d) => d.repoId === r.id);
+        if (open.length) throw new ClientError(`${r.name} has open decisions (${open.map((d) => d.id).join(', ')}): answer them first`);
+        this.repos.remove(r.id);
+        this.bus.feed('system', `Repo removed: ${r.name} (its files stay in ${r.path})`);
+        return { repoId: r.id };
+      }
+      case 'repo.default': {
+        const r = this.repos.setDefault(msg.repoId);
+        this.bus.feed('system', `New goals go to ${r.name}`);
+        return { repoId: r.id };
+      }
+      case 'repo.settings': {
+        if (msg.autoPush !== undefined) this.repos.setAutoPush(msg.repoId, msg.autoPush);
+        return { repoId: msg.repoId };
+      }
+      case 'repo.git':
+        return { output: await this.repoGit(msg.repoId, msg.action, msg.name, msg.visibility) };
+      case 'repo.clone': {
+        await remote.clone(msg.url, msg.path);
+        const r = await this.repos.add(msg.path);
+        this.bus.feed('system', `Cloned ${remote.shortRemote(msg.url)} into ${r.path} (${r.branch})`);
+        return { repoId: r.id };
+      }
     }
+  }
+
+  /** A user-triggered remote operation (the hub settings screen, or auto-push); returns git's output. */
+  async repoGit(repoId: string, action: 'fetch' | 'pull' | 'push' | 'publish', name?: string, visibility?: 'private' | 'public'): Promise<string> {
+    const output = await this.repos.remoteOp(repoId, async (r) => {
+      try {
+        switch (action) {
+          case 'fetch':
+            return await remote.fetchOrigin(r.path);
+          case 'pull':
+            return await remote.pull(r.path, r.branch);
+          case 'push':
+            return await remote.push(r.path, r.branch);
+          case 'publish':
+            return await remote.publish(r.path, name?.trim() || r.name, visibility ?? 'private');
+        }
+      } catch (e) {
+        if (e instanceof remote.RemoteError) throw new ClientError(e.message);
+        throw e;
+      }
+    });
+    const r = this.repos.require(repoId);
+    const what = { fetch: 'Fetched', pull: 'Pulled', push: 'Pushed', publish: 'Published' }[action];
+    this.bus.feed('system', `${what} ${r.name}${r.remote ? ` (${remote.shortRemote(r.remote)})` : ''}`);
+    return truncate(output, 2000);
   }
 
   async submitGoal(text: string, repoId?: string, extra: { model?: string; mode?: GoalMode } = {}): Promise<Goal> {

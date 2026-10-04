@@ -82,7 +82,7 @@ public class NewHubScreen extends Screen {
 			}
 		});
 		name = addRenderableWidget(field(x, y + 26, fw, name, 40, "Name"));
-		folder = addRenderableWidget(field(x, y + 92, fw, folder, 400, "Project folder"));
+		folder = addRenderableWidget(field(x, y + 92, fw, folder, 400, "Project folder or GitHub URL"));
 		folder.setResponder(v -> folderTouched = true);
 		setFocused(id);
 		id.setFocused(true);
@@ -117,6 +117,11 @@ public class NewHubScreen extends Screen {
 		return Path.of(System.getProperty("user.home"), "projects", hubId).toString();
 	}
 
+	/** Where a clone of {@code url} goes for a new hub: next to the other projects. */
+	static String cloneTarget(String url) {
+		return suggestFolder(HubSettingsScreen.nameFromUrl(url));
+	}
+
 	/** Why the form cannot be sent yet, or null. */
 	private @Nullable String problem() {
 		String v = id == null ? "" : id.getValue();
@@ -138,7 +143,10 @@ public class NewHubScreen extends Screen {
 	private String folderState() {
 		String f = folder == null ? "" : folder.getValue().trim();
 		if (f.isEmpty()) {
-			return "no project yet (connect one later in the console: /repo add <path>)";
+			return "no project yet (add one later in the hub's Settings)";
+		}
+		if (HubSettingsScreen.isUrl(f)) {
+			return "a GitHub URL: cloned into " + cloneTarget(f);
 		}
 		try {
 			Path p = Path.of(f);

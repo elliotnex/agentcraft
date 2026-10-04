@@ -422,6 +422,11 @@ public final class ForemanLink {
 	 * {@code ack.ok == false} is a normal completion: check it.
 	 */
 	public CompletableFuture<Ack> send(JsonObject message) {
+		return send(message, ACK_TIMEOUT_MS);
+	}
+
+	/** {@link #send(JsonObject)} waiting up to {@code timeoutMs} for the ack (a clone or push can take minutes). */
+	public CompletableFuture<Ack> send(JsonObject message, long timeoutMs) {
 		CompletableFuture<Ack> raw = new CompletableFuture<>();
 		WebSocket s = ws;
 		if (s == null || status.phase() != Phase.SYNCED) {
@@ -439,7 +444,7 @@ public final class ForemanLink {
 			message.addProperty("v", Protocol.VERSION);
 		}
 		pendingAcks.put(id, raw);
-		raw.orTimeout(ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS).whenComplete((a, e) -> pendingAcks.remove(id));
+		raw.orTimeout(timeoutMs, TimeUnit.MILLISECONDS).whenComplete((a, e) -> pendingAcks.remove(id));
 		sendRaw(s, message.toString()).exceptionally(t -> {
 			raw.completeExceptionally(t);
 			return null;

@@ -177,6 +177,12 @@ export const Repo = z.object({
   dirty: z.boolean().describe('user checkout has uncommitted tracked changes (merges are refused while dirty)'),
   worktrees: z.array(Worktree),
   ci: CiStatus.describe('latest CI/test result across this repo'),
+  remote: z.string().optional().describe('origin URL (credentials stripped); absent: no remote'),
+  upstream: z.string().optional().describe('the branch\'s upstream, e.g. "origin/main"'),
+  ahead: z.number().int().optional().describe('local commits not on the upstream (as of the last fetch): to push'),
+  behind: z.number().int().optional().describe('upstream commits not local (as of the last fetch): to pull'),
+  isDefault: z.boolean().optional().describe('goals without a repoId go here (else: the most recently added repo)'),
+  autoPush: z.boolean().optional().describe('push the branch to origin after every approved merge'),
 });
 export type Repo = z.infer<typeof Repo>;
 
@@ -306,6 +312,7 @@ export const RepoUpsertMsg = z.object({ ...envelope('repo.upsert'), repo: Repo }
 export const MemoryUpsertMsg = z.object({ ...envelope('memory.upsert'), entry: MemoryEntry });
 export const GoalUpsertMsg = z.object({ ...envelope('goal.upsert'), goal: Goal });
 export const FeedAddMsg = z.object({ ...envelope('feed.add'), item: FeedItem });
+export const RepoRemovedMsg = z.object({ ...envelope('repo.removed'), repoId: Id });
 export const DiffMsg = z.object({
   ...envelope('diff'),
   requestId: z.string(),
@@ -350,6 +357,7 @@ export const ServerMessage = z.discriminatedUnion('type', [
   MemoryUpsertMsg,
   GoalUpsertMsg,
   FeedAddMsg,
+  RepoRemovedMsg,
   DiffMsg,
   NotifyMsg,
   ForemanStatusMsg,
@@ -410,6 +418,22 @@ export const DiffRequestMsg = z.object({
   worktree: Id.describe('worktree id (e.g. "kit-t2"); an agent id resolves to that agent\'s current worktree'),
 });
 export const RepoAddMsg = z.object({ ...envelope('repo.add'), path: z.string().min(1) });
+export const RepoRemoveMsg = z.object({ ...envelope('repo.remove'), repoId: Id });
+export const RepoDefaultMsg = z.object({ ...envelope('repo.default'), repoId: Id });
+export const RepoSettingsMsg = z.object({ ...envelope('repo.settings'), repoId: Id, autoPush: z.boolean().optional() });
+export const RepoGitAction = z.enum(['fetch', 'pull', 'push', 'publish']);
+export const RepoGitMsg = z.object({
+  ...envelope('repo.git'),
+  repoId: Id,
+  action: RepoGitAction.describe('fetch | pull (fast-forward only) | push (sets the upstream) | publish (gh repo create --source --push)'),
+  name: z.string().optional().describe('publish: the GitHub repository name (default: the repo name)'),
+  visibility: z.enum(['private', 'public']).optional().describe('publish: default private'),
+});
+export const RepoCloneMsg = z.object({
+  ...envelope('repo.clone'),
+  url: z.string().min(1).describe('https or ssh git URL'),
+  path: z.string().min(1).describe('folder to clone into (must not exist, or be empty)'),
+});
 export const ModelInfo = z.object({
   id: z.string().describe('the id to send as `model`, e.g. "openai/gpt-5-mini"'),
   name: z.string(),
@@ -434,6 +458,11 @@ export const ClientMessage = z.discriminatedUnion('type', [
   DiffRequestMsg,
   RepoAddMsg,
   ModelsListMsg,
+  RepoRemoveMsg,
+  RepoDefaultMsg,
+  RepoSettingsMsg,
+  RepoGitMsg,
+  RepoCloneMsg,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -488,6 +517,7 @@ export const SERVER_MESSAGES = {
   'task.upsert': { schema: TaskUpsertMsg, doc: 'Task created or changed. Replace by `task.id`.' },
   'decision.upsert': { schema: DecisionUpsertMsg, doc: 'Decision opened, answered or cancelled. Replace by `decision.id`.' },
   'repo.upsert': { schema: RepoUpsertMsg, doc: 'Repo added or changed (worktrees, CI, head, dirty). Replace by `repo.id`.' },
+  'repo.removed': { schema: RepoRemovedMsg, doc: 'A repo was removed (repo.remove): drop it.' },
   'memory.upsert': { schema: MemoryUpsertMsg, doc: 'Memory entry written. Replace by `entry.id`.' },
   'goal.upsert': { schema: GoalUpsertMsg, doc: 'Goal created or progress/status changed. Replace by `goal.id`; latest goal is current.' },
   'feed.add': { schema: FeedAddMsg, doc: 'Append to the activity feed.' },
@@ -508,6 +538,11 @@ export const CLIENT_MESSAGES = {
   'diff.request': { schema: DiffRequestMsg, doc: 'Ask for the structured diff of a worktree. Answered with `diff` (same requestId).' },
   'models.list': { schema: ModelsListMsg, doc: 'open backend: the models its endpoint offers (OpenRouter: with prices). The ack result is `{models: ModelInfo[]}`, tool-capable models first.' },
   'repo.add': { schema: RepoAddMsg, doc: 'Register a local git repo (console: `/repo add <path>`).' },
+  'repo.remove': { schema: RepoRemoveMsg, doc: 'Forget a repo (its files stay). Refused while a task of it is in progress or in review, or a decision about it is open.' },
+  'repo.default': { schema: RepoDefaultMsg, doc: 'Goals without a repoId go to this repo.' },
+  'repo.settings': { schema: RepoSettingsMsg, doc: 'Per-repo settings: autoPush (push to origin after every approved merge).' },
+  'repo.git': { schema: RepoGitMsg, doc: 'User-triggered remote operation with the user\'s own git/gh login: fetch, pull, push or publish. Ack result: {output}.' },
+  'repo.clone': { schema: RepoCloneMsg, doc: 'Clone a git URL into a folder and register it. Ack result: {repoId}.' },
 } as const;
 
 export const ENTITY_SCHEMAS = {

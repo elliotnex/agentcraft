@@ -123,6 +123,12 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `dirty` | boolean | yes | user checkout has uncommitted tracked changes (merges are refused while dirty) |
 | `worktrees` | [Worktree](#worktree)[] | yes |  |
 | `ci` | `unknown` \| `running` \| `pass` \| `fail` | yes | latest CI/test result across this repo |
+| `remote` | string | no | origin URL (credentials stripped); absent: no remote |
+| `upstream` | string | no | the branch's upstream, e.g. "origin/main" |
+| `ahead` | integer | no | local commits not on the upstream (as of the last fetch): to push |
+| `behind` | integer | no | upstream commits not local (as of the last fetch): to pull |
+| `isDefault` | boolean | no | goals without a repoId go here (else: the most recently added repo) |
+| `autoPush` | boolean | no | push the branch to origin after every approved merge |
 
 ### <a id="worktree"></a>Worktree
 
@@ -600,6 +606,23 @@ Repo added or changed (worktrees, CI, head, dirty). Replace by `repo.id`.
 }
 ```
 
+### `repo.removed`
+
+A repo was removed (repo.remove): drop it.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `repoId` | string | yes |  |
+
+```json
+{
+  "v": 1,
+  "type": "repo.removed",
+  "repoId": "old-site"
+}
+```
+
 ### `memory.upsert`
 
 Memory entry written. Replace by `entry.id`.
@@ -1049,6 +1072,104 @@ Register a local git repo (console: `/repo add <path>`).
   "type": "repo.add",
   "id": "c18",
   "path": "C:\\Projects\\agentcraft\\sandbox\\demo-app"
+}
+```
+
+### `repo.remove`
+
+Forget a repo (its files stay). Refused while a task of it is in progress or in review, or a decision about it is open.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `repoId` | string | yes |  |
+
+```json
+{
+  "v": 1,
+  "type": "repo.remove",
+  "id": "c20",
+  "repoId": "old-site"
+}
+```
+
+### `repo.default`
+
+Goals without a repoId go to this repo.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `repoId` | string | yes |  |
+
+```json
+{
+  "v": 1,
+  "type": "repo.default",
+  "id": "c21",
+  "repoId": "demo-app"
+}
+```
+
+### `repo.settings`
+
+Per-repo settings: autoPush (push to origin after every approved merge).
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `repoId` | string | yes |  |
+| `autoPush` | boolean | no |  |
+
+```json
+{
+  "v": 1,
+  "type": "repo.settings",
+  "id": "c22",
+  "repoId": "demo-app",
+  "autoPush": true
+}
+```
+
+### `repo.git`
+
+User-triggered remote operation with the user's own git/gh login: fetch, pull, push or publish. Ack result: {output}.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `repoId` | string | yes |  |
+| `action` | `fetch` \| `pull` \| `push` \| `publish` | yes | fetch \| pull (fast-forward only) \| push (sets the upstream) \| publish (gh repo create --source --push) |
+| `name` | string | no | publish: the GitHub repository name (default: the repo name) |
+| `visibility` | `private` \| `public` | no | publish: default private |
+
+```json
+{
+  "v": 1,
+  "type": "repo.git",
+  "id": "c23",
+  "repoId": "demo-app",
+  "action": "push"
+}
+```
+
+### `repo.clone`
+
+Clone a git URL into a folder and register it. Ack result: {repoId}.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `url` | string | yes | https or ssh git URL |
+| `path` | string | yes | folder to clone into (must not exist, or be empty) |
+
+```json
+{
+  "v": 1,
+  "type": "repo.clone",
+  "id": "c24",
+  "url": "https://github.com/octo/site.git",
+  "path": "C:\\Projects\\site"
 }
 ```
 

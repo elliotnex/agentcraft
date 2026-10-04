@@ -123,6 +123,7 @@ export const SERVER_EXAMPLES: Ex<ServerMessage> = {
   'memory.upsert': { v: 1, type: 'memory.upsert', entry: memory },
   'goal.upsert': { v: 1, type: 'goal.upsert', goal: { id: 'g1', text: 'Add #tags to pocket-notes', progress: 0.56, status: 'active', repoId: 'demo-app', createdAt: ts, updatedAt: ts + 200_000 } },
   'feed.add': { v: 1, type: 'feed.add', item: { ts: ts + 210_000, kind: 'merge', text: 'Merged agentcraft/kit/t2-tag-parser-module into main (7cf1999, 2 files)', agentId: 'marlow' } },
+  'repo.removed': { v: 1, type: 'repo.removed', repoId: 'old-site' },
   diff: {
     v: 1,
     type: 'diff',
@@ -194,4 +195,9 @@ export const CLIENT_EXAMPLES: Ex<ClientMessage> = {
   'diff.request': { v: 1, type: 'diff.request', id: 'c17', requestId: 'r7', repoId: 'demo-app', worktree: 'kit-t2' },
   'repo.add': { v: 1, type: 'repo.add', id: 'c18', path: 'C:\\Projects\\agentcraft\\sandbox\\demo-app' },
   'models.list': { v: 1, type: 'models.list', id: 'c19', refresh: false },
+  'repo.remove': { v: 1, type: 'repo.remove', id: 'c20', repoId: 'old-site' },
+  'repo.default': { v: 1, type: 'repo.default', id: 'c21', repoId: 'demo-app' },
+  'repo.settings': { v: 1, type: 'repo.settings', id: 'c22', repoId: 'demo-app', autoPush: true },
+  'repo.git': { v: 1, type: 'repo.git', id: 'c23', repoId: 'demo-app', action: 'push' },
+  'repo.clone': { v: 1, type: 'repo.clone', id: 'c24', url: 'https://github.com/octo/site.git', path: 'C:\\Projects\\site' },
 };

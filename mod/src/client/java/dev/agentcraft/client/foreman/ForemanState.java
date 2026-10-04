@@ -425,6 +425,13 @@ public final class ForemanState {
 					fire(l -> l.onDecision(prev, d));
 				}
 			}
+			case "repo.removed" -> {
+				String id = json.has("repoId") ? json.get("repoId").getAsString() : null;
+				if (id != null && repos.remove(id) != null) {
+					fire(l -> {
+					});
+				}
+			}
 			case "repo.upsert" -> {
 				Repo r = ForemanJson.read(json, RepoUpsert.class).repo();
 				if (r != null && r.id() != null) {

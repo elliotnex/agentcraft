@@ -198,7 +198,10 @@ public class HubsScreen extends Screen {
 		}
 		boolean built = !Anchors.of(hub.id()).isEmpty();
 		if (!here && built) {
-			button(g, "go", hub, "Go", bx, ay - 6, open == 0, mx, my, clipTop, clipBottom);
+			bx = button(g, "go", hub, "Go", bx, ay - 6, open == 0, mx, my, clipTop, clipBottom);
+		}
+		if (!dev.agentcraft.hq.FreelancePavilion.HUB.equals(hub.id())) {
+			button(g, "settings", hub, "Settings", bx, ay - 6, false, mx, my, clipTop, clipBottom);
 		}
 		if (number < Hubs.all().size()) {
 			Panels.divider(g, x, y + CARD_H - 8, w);
@@ -266,6 +269,10 @@ public class HubsScreen extends Screen {
 			return;
 		}
 		@Nullable Hub hub = Hubs.get(hubId);
+		if (hub != null && action.equals("settings")) {
+			minecraft.gui.setScreen(new HubSettingsScreen(hub, this));
+			return;
+		}
 		if (hub == null) {
 			return;
 		}

@@ -12,6 +12,7 @@
 //    (unless signMerges is off); mergeStyle "squash" makes it a single-parent commit
 //  - removing a finished worktree's directory never fails an operation (busy dirs are retried
 //    later) and never deletes anything outside the worktree root
+import { remoteInfo, type RemoteInfo } from './remote.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -173,9 +174,72 @@ export class RepoManager {
     return r;
   }
 
-  /** Default repo for goals without an explicit repoId: the most recently added. */
+  /** Default repo for goals without an explicit repoId: the one marked default, else the most recently added. */
   defaultRepo(): Repo | undefined {
-    return this.repos[this.repos.length - 1];
+    return this.repos.find((r) => r.isDefault) ?? this.repos[this.repos.length - 1];
+  }
+
+  /** Mark `repoId` the default (unmarks the others). */
+  setDefault(repoId: string): Repo {
+    const r = this.require(repoId);
+    for (const o of this.repos) {
+      const want = o === r;
+      if (!!o.isDefault !== want) {
+        if (want) o.isDefault = true;
+        else delete o.isDefault;
+        this.emitRepo(o);
+      }
+    }
+    return r;
+  }
+
+  setAutoPush(repoId: string, on: boolean): Repo {
+    const r = this.require(repoId);
+    if (on) r.autoPush = true;
+    else delete r.autoPush;
+    this.emitRepo(r);
+    return r;
+  }
+
+  /** Forget a repo (its folder and branches stay). Refused while one of its worktrees is active. */
+  remove(repoId: string): Repo {
+    const r = this.require(repoId);
+    const active = r.worktrees.filter((w) => w.status === 'active');
+    if (active.length) throw new RepoError(`${r.name} has work in progress (${active.map((w) => w.id).join(', ')}): finish or reject it first`, 'refused');
+    this.repos.splice(this.repos.indexOf(r), 1);
+    this.ctx.store.markDirty();
+    this.ctx.emit({ type: 'repo.removed', repoId: r.id });
+    return r;
+  }
+
+  /** A user-triggered remote operation on a repo, queued with its merges, then a refresh. */
+  async remoteOp<T>(repoId: string, fn: (r: Repo) => Promise<T>): Promise<T> {
+    const r = this.require(repoId);
+    try {
+      return await this.serial(repoId, () => fn(r));
+    } finally {
+      await this.refresh(repoId).catch((e) => this.ctx.log.warn(`refresh ${repoId}: ${(e as Error).message}`));
+    }
+  }
+
+  /** origin / upstream / ahead / behind from local refs; true when something changed. */
+  private async updateRemote(r: Repo): Promise<boolean> {
+    let info: RemoteInfo;
+    try {
+      info = await remoteInfo(r.path, r.branch);
+    } catch {
+      return false;
+    }
+    let changed = false;
+    for (const k of ['remote', 'upstream', 'ahead', 'behind'] as const) {
+      const v = info[k];
+      if (r[k] !== v) {
+        if (v === undefined) delete r[k];
+        else (r as Record<string, unknown>)[k] = v;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   findWorktree(repoId: string, worktreeOrAgent: string): Worktree | undefined {
@@ -249,6 +313,7 @@ export class RepoManager {
     const h = await git(r.path, ['rev-parse', '--short', `refs/heads/${r.branch}`], { allowFail: true });
     if (h.code === 0) r.head = h.stdout.trim();
     r.dirty = await this.isDirty(r.path);
+    await this.updateRemote(r);
     for (const w of r.worktrees) {
       if (w.status !== 'active') continue;
       try {
@@ -271,7 +336,8 @@ export class RepoManager {
     const h = await git(r.path, ['rev-parse', '--short', `refs/heads/${r.branch}`], { allowFail: true });
     const head = h.code === 0 ? h.stdout.trim() : r.head;
     const dirty = await this.isDirty(r.path);
-    if (head === r.head && dirty === r.dirty) return false;
+    const remoteChanged = await this.updateRemote(r);
+    if (head === r.head && dirty === r.dirty && !remoteChanged) return false;
     if (head) r.head = head;
     r.dirty = dirty;
     this.emitRepo(r);

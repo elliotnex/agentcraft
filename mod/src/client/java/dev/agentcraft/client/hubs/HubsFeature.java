@@ -51,6 +51,45 @@ public final class HubsFeature {
 			}
 		});
 		DevBridge.registerScreen("newhub", mc -> new NewHubScreen(null));
+		DevBridge.register("dev.hubsettings", 10_000, "{hub, add?, press?: default|remove|fetch|pull|push|publish|visibility|autopush|add, repo?} - drive a hub's settings screen",
+			(req, mc) -> {
+				dev.agentcraft.client.dev.Fields f = dev.agentcraft.client.dev.Fields.of(req);
+				String hubId = f.nonBlank("hub");
+				String addText = f.optStr("add", null);
+				String press = f.optStr("press", null);
+				String repo = f.optStr("repo", "");
+				return DevBridge.onClient(mc, () -> {
+					Hub hub = Hubs.get(hubId);
+					if (hub == null) {
+						throw new DevBridge.DevException("no hub '" + hubId + "'");
+					}
+					if (!(mc.gui.screen() instanceof HubSettingsScreen s0) || s0.hub() != hub) {
+						mc.gui.setScreen(new HubSettingsScreen(hub, null));
+					}
+					HubSettingsScreen s = (HubSettingsScreen) mc.gui.screen();
+					if (addText != null) {
+						s.setAdd(addText);
+					}
+					if (press != null) {
+						s.press(press, repo);
+					}
+					com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+					o.addProperty("note", s.note());
+					com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+					for (var r : hub.state().repos().values()) {
+						com.google.gson.JsonObject j = new com.google.gson.JsonObject();
+						j.addProperty("id", r.id());
+						j.addProperty("remote", r.remote());
+						j.addProperty("ahead", r.ahead());
+						j.addProperty("behind", r.behind());
+						j.addProperty("isDefault", r.isDefault());
+						j.addProperty("autoPush", r.autoPush());
+						arr.add(j);
+					}
+					o.add("repos", arr);
+					return o;
+				});
+			});
 		DevBridge.register("dev.newhub", 10_000, "{hub?, name?, folder?, press?: theme|create|back, arg?:0} - drive the new-hub form (opens it first)",
 			(req, mc) -> {
 				dev.agentcraft.client.dev.Fields f = dev.agentcraft.client.dev.Fields.of(req);
@@ -159,6 +198,15 @@ public final class HubsFeature {
 			}
 			PENDING_REPOS.remove(e.getKey());
 			String folder = e.getValue();
+			if (HubSettingsScreen.isUrl(folder)) {
+				// a GitHub URL: the hub's Foreman clones it next to the other projects
+				String dest = NewHubScreen.cloneTarget(folder);
+				say(mc, "Cloning " + HubSettingsScreen.shortRemote(folder) + " for '" + hub.id() + "'...");
+				dev.agentcraft.client.foreman.Foreman.cloneRepo(hub, folder, dest).whenComplete((ack, err) -> say(mc, err != null || !ack.ok()
+					? "Couldn't clone " + folder + ": " + (err != null ? err.getMessage() : ack.error())
+					: "Hub '" + hub.id() + "' is working on " + dest + " (cloned from " + HubSettingsScreen.shortRemote(folder) + "). Give its team a goal in the console."));
+				continue;
+			}
 			java.util.concurrent.CompletableFuture.supplyAsync(() -> prepareRepo(folder, hub.name())).whenComplete((made, err) -> mc.execute(() -> {
 				if (err != null) {
 					say(mc, "Couldn't set up " + folder + ": " + (err.getCause() != null ? err.getCause().getMessage() : err.getMessage()));

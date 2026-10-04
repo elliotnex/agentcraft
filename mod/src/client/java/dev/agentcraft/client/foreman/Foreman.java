@@ -123,6 +123,31 @@ public final class Foreman {
 		});
 	}
 
+	/** Hub settings: forget a repo (refused while work on it is in flight). */
+	public static CompletableFuture<Ack> removeRepo(Hub hub, String repoId) {
+		return hub.link().send(ForemanJson.msg("repo.remove").put("repoId", repoId).json());
+	}
+
+	/** Hub settings: goals without a repo go to this one. */
+	public static CompletableFuture<Ack> setDefaultRepo(Hub hub, String repoId) {
+		return hub.link().send(ForemanJson.msg("repo.default").put("repoId", repoId).json());
+	}
+
+	public static CompletableFuture<Ack> setAutoPush(Hub hub, String repoId, boolean on) {
+		return hub.link().send(ForemanJson.msg("repo.settings").put("repoId", repoId).put("autoPush", on).json());
+	}
+
+	/** Hub settings: fetch | pull | push | publish, with the user's own git/gh login (ack result: {output}). */
+	public static CompletableFuture<Ack> repoGit(Hub hub, String repoId, String action, @Nullable String name, @Nullable String visibility) {
+		return hub.link().send(ForemanJson.msg("repo.git").put("repoId", repoId).put("action", action).put("name", name).put("visibility", visibility).json(),
+			6 * 60_000);
+	}
+
+	/** Clone a git URL into {@code path} and register it with {@code hub}'s Foreman (ack result: {repoId}). */
+	public static CompletableFuture<Ack> cloneRepo(Hub hub, String url, String path) {
+		return hub.link().send(ForemanJson.msg("repo.clone").put("url", url).put("path", path).json(), 11 * 60_000);
+	}
+
 	public static CompletableFuture<Ack> addRepoTo(Hub hub, String path) {
 		return hub.link().send(ForemanJson.msg("repo.add").put("path", path).json());
 	}

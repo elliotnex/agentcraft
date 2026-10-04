@@ -180,7 +180,8 @@ public final class Protocol {
 	}
 
 	public record Repo(String id, String name, String path, String branch, @Nullable String head, boolean dirty, List<Worktree> worktrees,
-		CiStatus ci) {
+		CiStatus ci, @Nullable String remote, @Nullable String upstream, @Nullable Integer ahead, @Nullable Integer behind, @Nullable Boolean isDefault,
+		@Nullable Boolean autoPush) {
 		public Repo {
 			name = name == null ? id : name;
 			worktrees = worktrees == null ? List.of() : List.copyOf(worktrees);
