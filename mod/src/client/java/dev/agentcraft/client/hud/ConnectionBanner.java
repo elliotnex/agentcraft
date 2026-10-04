@@ -67,7 +67,7 @@ public final class ConnectionBanner implements HudElement {
 			detail = "AGENTCRAFT_FOREMAN=0";
 		} else if (link.synced()) {
 			dot = fs != null && fs.auth() == AuthStatus.FAILED ? "error" : fs != null && fs.auth() == AuthStatus.CHECKING ? "thinking" : "working";
-			title = "Foreman · " + backendLabel(fs);
+			title = "Foreman · " + hubLabel() + backendLabel(fs);
 			if (fs != null && fs.backend() == BackendName.CLAUDE && fs.account() != null) {
 				detail = fs.account();
 			}
@@ -77,11 +77,11 @@ public final class ConnectionBanner implements HudElement {
 		} else if (link.everSynced()) {
 			dot = "waiting";
 			pulse = true;
-			title = "Reconnecting to the Foreman" + (link.attempt() > 1 ? " (" + link.attempt() + ")" : "");
+			title = hubLabel() + "Reconnecting to the Foreman" + (link.attempt() > 1 ? " (" + link.attempt() + ")" : "");
 			detail = "showing last known state";
 		} else {
 			dot = "idle";
-			title = "Foreman not running";
+			title = hubLabel() + "Foreman not running";
 			detail = "start it: cd foreman; npm run start";
 		}
 		drawPill(g, font, dot, title, detail, alpha, pulse, now);
@@ -89,6 +89,11 @@ public final class ConnectionBanner implements HudElement {
 		if (link.synced() && fs != null && fs.auth() == AuthStatus.FAILED) {
 			drawAuthBanner(g, font, fs);
 		}
+	}
+
+	/** "webv3 · " when the world has more than one hub (which project this studio is), else nothing. */
+	private static String hubLabel() {
+		return dev.agentcraft.client.foreman.Hubs.all().size() > 1 ? dev.agentcraft.client.foreman.Foreman.hub().name() + " · " : "";
 	}
 
 	private static String backendLabel(ForemanStatus fs) {

@@ -230,7 +230,17 @@ public final class ForemanFeature {
 				}
 			}
 		}
-		if (mc.player == null || ++hubTick % 10 != 0) {
+		if (++hubTick % 10 != 0) {
+			return;
+		}
+		if (enabled) {
+			for (Hub h : Hubs.all()) {
+				if (!h.connected()) {
+					ForemanStarter.maybeStart(h);
+				}
+			}
+		}
+		if (mc.player == null) {
 			return;
 		}
 		HubRegistry.Hub here = HubRegistry.at(mc.player.getX());
