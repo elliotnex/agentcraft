@@ -8,6 +8,7 @@ import dev.agentcraft.client.console.ConsoleCommands.Decide;
 import dev.agentcraft.client.console.ConsoleCommands.Empty;
 import dev.agentcraft.client.console.ConsoleCommands.Goal;
 import dev.agentcraft.client.console.ConsoleCommands.Help;
+import dev.agentcraft.client.console.ConsoleCommands.HubList;
 import dev.agentcraft.client.console.ConsoleCommands.Intent;
 import dev.agentcraft.client.console.ConsoleCommands.Invalid;
 import dev.agentcraft.client.console.ConsoleCommands.Message;
@@ -17,12 +18,15 @@ import dev.agentcraft.client.console.ConsoleCommands.ShowDiff;
 import dev.agentcraft.client.console.ConsoleCommands.Sound;
 import dev.agentcraft.client.console.ConsoleCommands.Status;
 import dev.agentcraft.client.console.ConsoleCommands.TaskAction;
+import dev.agentcraft.client.console.ConsoleCommands.UseHub;
 import dev.agentcraft.client.console.ConsoleLog.Tone;
 import dev.agentcraft.client.decisions.DecisionQueue;
 import dev.agentcraft.client.decisions.DecisionsFeature;
 import dev.agentcraft.client.decisions.DiffLink;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
+import dev.agentcraft.client.foreman.Hub;
+import dev.agentcraft.client.foreman.Hubs;
 import dev.agentcraft.client.foreman.Protocol.Ack;
 import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.Decision;
@@ -138,6 +142,26 @@ public final class ConsoleActions {
 				String state = HudSounds.enabled() ? "on" : "off";
 				String why = HudSounds.forcedMute() ? " (the game was started muted: AGENTCRAFT_MUTE=1)" : "";
 				ConsoleLog.add(Tone.INFO, "Decision bell and done chime: " + state + why);
+				clearFeedback();
+				return After.CLEAR;
+			}
+			case UseHub u -> {
+				ConsoleLog.remember(raw);
+				Hub hub = Hubs.get(u.hubId());
+				if (hub == null) {
+					setFeedback("that hub is gone", Tone.ERROR, false);
+					return After.KEEP;
+				}
+				boolean already = hub == Hubs.active();
+				Hubs.setActive(hub);
+				ConsoleLog.add(Tone.HEADER, (already ? "Already talking to " : "Talking to ") + hub.name()
+					+ (hub.connected() ? "" : " (its Foreman is offline)"));
+				setFeedback("walking into a studio switches to that studio's hub", Tone.INFO, false);
+				return After.CLEAR;
+			}
+			case HubList l -> {
+				ConsoleLog.remember(raw);
+				hubs();
 				clearFeedback();
 				return After.CLEAR;
 			}
@@ -343,6 +367,17 @@ public final class ConsoleActions {
 			return null;
 		}
 		return String.format(java.util.Locale.ROOT, "$%.2f", st.costUsd());
+	}
+
+	private static void hubs() {
+		ConsoleLog.add(Tone.HEADER, "Hubs");
+		Hub active = Hubs.active();
+		for (Hub h : Hubs.all()) {
+			ForemanState hs = h.state();
+			String state = h.connected() ? hs.agents().size() + " agents · " + hs.openDecisions().size() + " waiting" : "offline";
+			ConsoleLog.add(Tone.INFO, (h == active ? "▶ " : "   ") + h.name() + " (" + h.id() + ") · " + state);
+		}
+		ConsoleLog.add(Tone.INFO, "/hub <name> talks to another; /hub alone steps to the next");
 	}
 
 	private static void repos(ForemanState s) {

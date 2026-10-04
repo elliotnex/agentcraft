@@ -39,6 +39,7 @@ public final class ConsoleLog {
 	private static boolean historyLoaded;
 	private static long lastLocalTs;
 
+	private static @Nullable ForemanState cachedState;
 	private static long cachedFeedRev = -1;
 	private static long cachedLocalRev = -1;
 	private static List<Line> cached = List.of();
@@ -80,7 +81,8 @@ public final class ConsoleLog {
 	public static List<Line> lines() {
 		ForemanState s = Foreman.state();
 		long fr = s == null ? -1 : s.revision();
-		if (fr == cachedFeedRev && localRevision == cachedLocalRev) {
+		// (each hub has its own state and revision counter: switching hubs must rebuild)
+		if (s == cachedState && fr == cachedFeedRev && localRevision == cachedLocalRev) {
 			return cached;
 		}
 		List<Line> feed = new ArrayList<>();
@@ -104,6 +106,7 @@ public final class ConsoleLog {
 			}
 		}
 		cached = List.copyOf(out);
+		cachedState = s;
 		cachedFeedRev = fr;
 		cachedLocalRev = localRevision;
 		return cached;

@@ -15,6 +15,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Wires the Foreman link: creates the state model and the WebSocket client at startup, starts it
@@ -228,11 +229,14 @@ public final class ForemanFeature {
 
 	private static long seenHubsRevision = -1;
 	private static int hubTick;
+	/** The hub plot the player stood in at the last check (null: outside every hub). */
+	private static @Nullable String lastHereId;
 
 	/**
 	 * Keeps the links in step with the world's hubs ({@link HubRegistry}: a new hub gets its link) and
-	 * makes the hub the player stands in the active one. Client thread, every tick (cheap; the position
-	 * check runs twice a second).
+	 * makes the hub the player walks into the active one. Only crossing into a hub's plot switches, so
+	 * a hub picked by hand (console {@code /hub}) holds until the player enters another plot. Client
+	 * thread, every tick (cheap; the position check runs twice a second).
 	 */
 	private static void followWorldHubs(Minecraft mc, boolean enabled) {
 		long rev = HubRegistry.revision();
@@ -258,12 +262,20 @@ public final class ForemanFeature {
 			}
 		}
 		if (mc.player == null) {
+			lastHereId = null;
 			return;
 		}
 		HubRegistry.Hub here = HubRegistry.at(mc.player.getX(), mc.player.getZ());
-		Hub hub = here == null ? null : Hubs.get(here.id());
+		String hereId = here == null ? null : here.id();
+		if (java.util.Objects.equals(hereId, lastHereId)) {
+			return;
+		}
+		Hub hub = hereId == null ? null : Hubs.get(hereId);
 		if (hub != null) {
 			Hubs.setActive(hub);
+			lastHereId = hereId;
+		} else if (hereId == null) {
+			lastHereId = null;
 		}
 	}
 

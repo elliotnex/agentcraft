@@ -51,6 +51,7 @@ final class HelpBoard {
 			case "console" -> new Page("Console commands", "type them in the console (" + key(Keys.console, "`") + ")", List.of(
 				new Row("any text", "a new goal for Marlow and the team"),
 				new Row("@kit text", "message one agent (@all: everyone)"),
+				new Row("/hub [name]  /hubs", "talk to another hub (alone: the next); list them"),
 				new Row("/answer [d4] <n> [text]", "answer a decision by button number"),
 				new Row("/status", "goal, agents, tasks, decisions, spend"),
 				new Row("/diff [@agent]", "review a worktree's changes"),

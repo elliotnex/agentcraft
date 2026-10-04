@@ -12,6 +12,7 @@ import dev.agentcraft.client.console.ConsoleLog.Tone;
 import dev.agentcraft.client.decisions.DecisionsFeature;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
+import dev.agentcraft.client.foreman.Hubs;
 import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.FeedKind;
 import dev.agentcraft.client.foreman.Protocol.Repo;
@@ -628,11 +629,17 @@ public class ConsoleScreen extends Screen {
 		int w = panelW - p.left() - p.right();
 		int y = panelY + p.top();
 
-		// header: title + link summary, roster on the right
+		// header: title (+ the hub it talks to, when there are several) + link summary, roster on the right
 		g.text(font, "Console", x, y + 5, UiBits.ink(), false);
+		int titleW = font.width("Console");
+		if (Hubs.all().size() > 1) {
+			String hub = "· " + Hubs.active().name();
+			g.text(font, hub, x + titleW + 6, y + 5, UiStyle.BRASS, false);
+			titleW += 6 + font.width(hub);
+		}
 		String sub = headerSub(s);
 		int rosterW = rosterWidth(s);
-		g.text(font, TextUtil.ellipsize(font, sub, w - font.width("Console") - 10 - rosterW), x + font.width("Console") + 6, y + 5, UiBits.muted(), false);
+		g.text(font, TextUtil.ellipsize(font, sub, w - titleW - 10 - rosterW), x + titleW + 6, y + 5, UiBits.muted(), false);
 		drawRoster(g, s, x + w - rosterW + 2, y, mouseX, mouseY);
 		y += 20;
 		g.fill(x, y, x + w, y + 1, UiStyle.color("palette.ui.edge", 0xFFC9BBA3));

@@ -2,6 +2,8 @@ package dev.agentcraft.client.console;
 
 import dev.agentcraft.client.decisions.DecisionQueue;
 import dev.agentcraft.client.foreman.ForemanState;
+import dev.agentcraft.client.foreman.Hub;
+import dev.agentcraft.client.foreman.Hubs;
 import dev.agentcraft.client.foreman.Protocol;
 import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.Decision;
@@ -31,6 +33,7 @@ import org.jspecify.annotations.Nullable;
  * /spawn @x [taskId]               agent.action spawn
  * /task &lt;id&gt; cancel|retry|prioritize [n]|reassign @x
  * /diff [worktree|@agent]          diff review screen (or a summary)
+ * /hub [name]   /hubs              talk to another hub (no name: the next one) / list hubs
  * /status /help /decide /clear /sound on|off
  * </pre>
  */
@@ -41,7 +44,7 @@ public final class ConsoleCommands {
 	// ------------------------------------------------------------------ intents
 
 	public sealed interface Intent permits Goal, Message, Answer, RepoAdd, Repos, AgentAction, TaskAction, ShowDiff, Status, Help, Decide, Clear,
-		Sound, Invalid, Empty {
+		Sound, UseHub, HubList, Invalid, Empty {
 	}
 
 	/** {@code repoId} null = the Foreman's default; {@code choices} non-empty = ask which repo first. */
@@ -85,6 +88,13 @@ public final class ConsoleCommands {
 	public record Sound(@Nullable Boolean on) implements Intent {
 	}
 
+	/** Make {@code hubId} the hub the console (and HUD, screens) talk to. */
+	public record UseHub(String hubId) implements Intent {
+	}
+
+	public record HubList() implements Intent {
+	}
+
 	public record Invalid(String error) implements Intent {
 	}
 
@@ -106,6 +116,8 @@ public final class ConsoleCommands {
 		new Command("task", "/task <id> cancel|retry|prioritize|reassign", "steer a task"),
 		new Command("repo", "/repo add <path>", "register a local git repo"),
 		new Command("repos", "/repos", "list repos"),
+		new Command("hub", "/hub [name]", "talk to another hub (no name: the next one)"),
+		new Command("hubs", "/hubs", "list hubs; the console talks to one"),
 		new Command("status", "/status", "goal, agents, tasks and decisions"),
 		new Command("sound", "/sound on|off", "decision bell and done chime"),
 		new Command("clear", "/clear", "clear the console's own lines"),
@@ -186,6 +198,8 @@ public final class ConsoleCommands {
 			case "decide", "decisions", "d" -> new Decide(args.isEmpty() ? null : args.get(0));
 			case "clear", "cls" -> new Clear();
 			case "sound", "sounds", "mute" -> parseSound(cmd, args);
+			case "hub" -> parseHub(args);
+			case "hubs" -> new HubList();
 			case "goal" -> rest.isEmpty() ? new Invalid("type the goal after /goal") : goal(rest, s);
 			default -> new Invalid("unknown command /" + cmd + " (/help lists them)");
 		};
@@ -203,6 +217,53 @@ public final class ConsoleCommands {
 			case "off", "0", "no" -> new Sound(false);
 			default -> new Invalid("/sound on or /sound off");
 		};
+	}
+
+	private static Intent parseHub(List<String> args) {
+		List<Hub> hubs = Hubs.all();
+		if (args.isEmpty()) {
+			if (hubs.size() <= 1) {
+				return new Invalid("there is only one hub (/ac hub create <id> in chat adds another)");
+			}
+			// the next hub after the active one, wrapping
+			int i = hubs.indexOf(Hubs.active());
+			return new UseHub(hubs.get((i + 1) % hubs.size()).id());
+		}
+		String a = args.get(0);
+		if (a.equalsIgnoreCase("list") || a.equalsIgnoreCase("ls")) {
+			return new HubList();
+		}
+		String id = resolveHub(a);
+		return id == null ? new Invalid("no hub named " + a + " (" + hubNames() + ")") : new UseHub(id);
+	}
+
+	/** Hub id for "webv3", "Web V3", "web" (exact id or name, else a unique prefix of either). */
+	public static @Nullable String resolveHub(String token) {
+		String t = token.toLowerCase(Locale.ROOT);
+		List<Hub> hubs = Hubs.all();
+		for (Hub h : hubs) {
+			if (h.id().toLowerCase(Locale.ROOT).equals(t) || h.name().toLowerCase(Locale.ROOT).equals(t)) {
+				return h.id();
+			}
+		}
+		String found = null;
+		for (Hub h : hubs) {
+			if (h.id().toLowerCase(Locale.ROOT).startsWith(t) || h.name().toLowerCase(Locale.ROOT).startsWith(t)) {
+				if (found != null) {
+					return null;
+				}
+				found = h.id();
+			}
+		}
+		return found;
+	}
+
+	private static String hubNames() {
+		List<String> ids = new ArrayList<>();
+		for (Hub h : Hubs.all()) {
+			ids.add(h.id());
+		}
+		return "hubs: " + String.join(", ", ids);
 	}
 
 	private static Intent parseRepo(String rest, List<String> args) {
@@ -491,6 +552,8 @@ public final class ConsoleCommands {
 			case Decide d -> "open decisions";
 			case Clear c -> "clear console";
 			case Sound so -> so.on() == null ? "sound status" : so.on() ? "sound on" : "sound off";
+			case UseHub u -> "talk to hub " + u.hubId();
+			case HubList l -> "list hubs";
 			case Invalid i -> null;
 			case Empty e -> null;
 		};
@@ -603,6 +666,17 @@ public final class ConsoleCommands {
 			case "/repo" -> {
 				if (argIndex == 1 && "add".startsWith(lower)) {
 					out.add(new Completion(ts, cursor, "add ", "add", "register a local git repo", null, null));
+				}
+			}
+			case "/hub" -> {
+				if (argIndex == 1) {
+					Hub active = Hubs.active();
+					for (Hub h : Hubs.all()) {
+						if (h.id().toLowerCase(Locale.ROOT).startsWith(lower) || h.name().toLowerCase(Locale.ROOT).startsWith(lower)) {
+							String detail = (h == active ? "talking to it now · " : "") + (h.connected() ? h.state().agents().size() + " agents" : "offline");
+							out.add(new Completion(ts, cursor, h.id(), h.name(), detail, null, null));
+						}
+					}
 				}
 			}
 			case "/sound" -> {
@@ -795,6 +869,7 @@ public final class ConsoleCommands {
 			case Help h -> m.put("topic", h.topic());
 			case Decide d -> m.put("decisionId", d.decisionId());
 			case Sound so -> m.put("on", so.on());
+			case UseHub u -> m.put("hubId", u.hubId());
 			case Invalid i -> m.put("error", i.error());
 			default -> {
 			}
