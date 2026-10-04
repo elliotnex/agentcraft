@@ -454,7 +454,7 @@ public class TaskScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		if (event.button() == 0) {
+		if (event.button() == com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT) { // 26.x numbers buttons from 1 (SDL)
 			for (Btn b : List.copyOf(buttons)) {
 				if (b.enabled() && b.hit(event.x(), event.y())) {
 					press(b);

@@ -218,7 +218,7 @@ public class HubsScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		if (event.button() == 0) {
+		if (event.button() == com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT) { // 26.x numbers buttons from 1 (SDL)
 			for (Btn b : List.copyOf(buttons)) {
 				if (b.hit(event.x(), event.y())) {
 					dev.agentcraft.AgentCraft.LOGGER.info("Hubs overview: click {} {} hit {} '{}'", (int) event.x(), (int) event.y(), b.action(), b.hub());

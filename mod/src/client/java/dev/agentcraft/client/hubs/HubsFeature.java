@@ -54,12 +54,13 @@ public final class HubsFeature {
 			}
 		});
 		DevBridge.registerScreen("hubs", mc -> new HubsScreen());
-		DevBridge.register("dev.screen.click", 5_000, "{x, y, button?:0} - click the open screen at GUI coordinates (as the mouse would)",
+		DevBridge.register("dev.screen.click", 5_000, "{x, y, button?:1} - click the open screen at GUI coordinates (as the mouse would; 1 = left)",
 			(req, mc) -> {
 				dev.agentcraft.client.dev.Fields f = dev.agentcraft.client.dev.Fields.of(req);
 				double x = f.optLong("x", -1, 0, 100_000);
 				double y = f.optLong("y", -1, 0, 100_000);
-				int button = f.optInt("button", 0, 0, 2);
+				// the real mouse numbering (26.x/SDL: left 1, middle 2, right 3), so a dev click takes the same path as the player's
+				int button = f.optInt("button", com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 1, 3);
 				return DevBridge.onClient(mc, () -> {
 					com.google.gson.JsonObject o = new com.google.gson.JsonObject();
 					var screen = mc.gui.screen();
