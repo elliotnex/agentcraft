@@ -144,7 +144,8 @@ public final class Protocol {
 
 	public record Task(String id, String title, @Nullable String description, TaskStatus status, @Nullable String assignee, List<String> deps,
 		@Nullable String repoId, @Nullable String goalId, int priority, @Nullable String branch, @Nullable String worktree, CiStatus ci,
-		@Nullable String blockedReason, @Nullable String summary, @Nullable String createdBy, long createdAt, long updatedAt) {
+		@Nullable String blockedReason, @Nullable String summary, @Nullable String createdBy, long createdAt, long updatedAt, @Nullable Double costUsd,
+		@Nullable String model) {
 		public Task {
 			title = title == null ? id : title;
 			status = status == null ? TaskStatus.UNKNOWN : status;
@@ -319,6 +320,18 @@ public final class Protocol {
 
 	/** Reply to a client message with an id. {@code result} e.g. {goalId} for goal.submit. */
 	public record Ack(String re, boolean ok, @Nullable String error, @Nullable JsonObject result) {
+	}
+
+	/** One model of the open backend's endpoint (models.list); prices in USD per million tokens, null when unknown. */
+	public record ModelInfo(String id, String name, @Nullable Double promptUsdPerM, @Nullable Double completionUsdPerM, @Nullable Integer contextLength,
+		@Nullable Boolean tools) {
+		public ModelInfo {
+			name = name == null || name.isBlank() ? id : name;
+		}
+
+		public boolean free() {
+			return promptUsdPerM != null && completionUsdPerM != null && promptUsdPerM == 0 && completionUsdPerM == 0;
+		}
 	}
 
 	public record ErrorMsg(String message, @Nullable String re) {

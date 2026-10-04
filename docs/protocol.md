@@ -79,6 +79,8 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `ci` | [CiStatus](#cistatus) | yes |  |
 | `blockedReason` | string | no |  |
 | `summary` | string | no | worker/lead summary of the result |
+| `costUsd` | number | no | open: spend of this task (provider-reported, else estimated from the model price) |
+| `model` | string | no | open: the model the task runs on |
 | `createdBy` | string | yes | agent id or "user" |
 | `createdAt` | integer | yes | epoch milliseconds |
 | `updatedAt` | integer | yes | epoch milliseconds |
@@ -1011,6 +1013,24 @@ Ask for the structured diff of a worktree. Answered with `diff` (same requestId)
   "requestId": "r7",
   "repoId": "demo-app",
   "worktree": "kit-t2"
+}
+```
+
+### `models.list`
+
+open backend: the models its endpoint offers (OpenRouter: with prices). The ack result is `{models: ModelInfo[]}`, tool-capable models first.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `refresh` | boolean | no | fetch again instead of the cached list (cached ~10 minutes) |
+
+```json
+{
+  "v": 1,
+  "type": "models.list",
+  "id": "c19",
+  "refresh": false
 }
 ```
 

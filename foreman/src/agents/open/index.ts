@@ -7,7 +7,8 @@ import type { OpenConfig } from '../../config.js';
 import { OPENROUTER_URL } from '../../config.js';
 import { SCOUT } from '../../cast.js';
 import { autoApproves, classifyBash, describeRuleKey } from '../../policy.js';
-import { MERGE_OPTIONS, PERMISSION_OPTIONS, type Decision, type Goal, type GoalMode, type Task } from '../../protocol.js';
+import { MERGE_OPTIONS, PERMISSION_OPTIONS, type Decision, type Goal, type GoalMode, type ModelInfo, type Task } from '../../protocol.js';
+import { estimateCost, fetchModels } from './models.js';
 import { firstLine, truncate } from '../../util/text.js';
 import { userName } from '../../user.js';
 import { openAiClient, type ChatMessage, type CompleteFn } from './client.js';
@@ -38,13 +39,18 @@ export class OpenBackend implements Backend {
   /** conversations by task, for requested changes (lost on restart: a follow-up then starts fresh) */
   private readonly chats = new Map<string, ChatMessage[]>();
   private stopping = false;
+  private catalog?: { at: number; models: ModelInfo[] };
+  private catalogLoading?: Promise<ModelInfo[]>;
+  private readonly fetchCatalog: () => Promise<ModelInfo[]>;
 
   constructor(
     private readonly fm: Foreman,
     private readonly cfg: OpenConfig,
     complete?: CompleteFn,
     private readonly env: NodeJS.ProcessEnv = process.env,
+    fetchCatalog?: () => Promise<ModelInfo[]>,
   ) {
+    this.fetchCatalog = fetchCatalog ?? (() => fetchModels(cfg.baseUrl, this.apiKey()));
     this.complete = complete ?? openAiClient({ baseUrl: cfg.baseUrl, ...(this.apiKey() ? { apiKey: this.apiKey()! } : {}), appName: 'AgentCraft' });
   }
 
@@ -78,7 +84,7 @@ export class OpenBackend implements Backend {
 
   async start(): Promise<void> {
     if (this.cfg.baseUrl === OPENROUTER_URL && !this.apiKey()) {
-      this.fm.setStatus({ auth: 'failed', model: this.model(), message: `No OpenRouter key: set ${this.cfg.apiKeyEnv} and restart the freelancer` });
+      this.fm.setStatus({ auth: 'failed', account: this.provider(), model: this.model(), message: `No OpenRouter key: set ${this.cfg.apiKeyEnv} and restart the freelancer` });
     } else {
       this.fm.setStatus({ auth: 'ok', account: this.provider(), message: `Freelancer on ${this.model()} (${this.provider()})` });
     }
@@ -88,6 +94,28 @@ export class OpenBackend implements Backend {
       if (t.assignee === ID && t.status === 'doing') this.fm.tasks.setStatus(t.id, 'blocked', { force: true, reason: 'interrupted by a restart: retry it' });
     }
     this.fm.setAgent(ID, { active: true, paused: false, state: 'idle', station: 'terminal', activity: `ready (${shortModel(this.model())})`, taskId: null, worktree: null });
+    // prices for cost estimates (when a provider does not report spend); the terminal asks for it anyway
+    void this.listModels().catch((e: Error) => this.fm.log.info(`model list: ${e.message}`));
+  }
+
+  /** The endpoint's models (cached ten minutes; a failed fetch keeps the last list). */
+  async listModels(refresh = false): Promise<ModelInfo[]> {
+    if (!refresh && this.catalog && Date.now() - this.catalog.at < 10 * 60_000) return this.catalog.models;
+    this.catalogLoading ??= this.fetchCatalog()
+      .then((models) => {
+        this.catalog = { at: Date.now(), models };
+        return models;
+      })
+      .catch((e: Error) => {
+        if (this.catalog) return this.catalog.models;
+        throw e;
+      })
+      .finally(() => (this.catalogLoading = undefined));
+    return this.catalogLoading;
+  }
+
+  private modelInfo(id: string): ModelInfo | undefined {
+    return this.catalog?.models.find((m) => m.id === id);
   }
 
   async stop(): Promise<void> {
@@ -125,6 +153,7 @@ export class OpenBackend implements Backend {
       goalId: goal.id,
     });
     this.st.taskModels[t.id] = this.model();
+    this.fm.tasks.update(t.id, { model: this.model() });
     this.fm.store.markDirty();
     this.fm.setGoal(goal.id, { status: 'active' });
     this.enqueue({ taskId: t.id, mode });
@@ -256,8 +285,10 @@ export class OpenBackend implements Backend {
       if (signal.aborted) throw new Error('stopped');
       this.fm.setAgent(ID, { state: 'thinking', station: 'terminal' });
       const res = await this.complete({ model, messages: chat, tools, signal });
-      if (res.costUsd) {
-        this.st.costUsd += res.costUsd;
+      const cost = res.costUsd ?? estimateCost(this.modelInfo(model), res.tokensIn, res.tokensOut);
+      if (cost) {
+        this.st.costUsd += cost;
+        this.fm.tasks.update(t.id, { costUsd: (this.fm.tasks.get(t.id)?.costUsd ?? 0) + cost });
         this.publishStatus();
       }
       const msg = res.message;
@@ -424,7 +455,7 @@ export class OpenBackend implements Backend {
       kind: 'merge',
       question: `Merge ${t.id} "${t.title}" (${wt.branch}) into ${wt.base}?`,
       options: [...MERGE_OPTIONS],
-      context: `${summary}\n${wt.files} files, +${wt.additions} -${wt.deletions} | tests: ${cur.ci} | model: ${this.st.taskModels[t.id] ?? this.model()}`,
+      context: `${summary}\n${wt.files} files, +${wt.additions} -${wt.deletions} | tests: ${cur.ci} | model: ${this.st.taskModels[t.id] ?? this.model()}${cur.costUsd ? ` | cost: $${cur.costUsd.toFixed(4)}` : ''}`,
       taskId: t.id,
       repoId: t.repoId,
       worktree: wt.id,

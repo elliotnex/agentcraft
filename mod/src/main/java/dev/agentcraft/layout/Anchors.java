@@ -79,6 +79,10 @@ public final class Anchors {
 						load(server, h.id());
 					}
 				}
+				// the freelancer's pavilion: a hub without a registry entry, known by its layout file
+				if (Files.exists(file(server, dev.agentcraft.hq.FreelancePavilion.HUB))) {
+					load(server, dev.agentcraft.hq.FreelancePavilion.HUB);
+				}
 			}
 		});
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

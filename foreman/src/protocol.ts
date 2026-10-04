@@ -118,6 +118,8 @@ export const Task = z.object({
   ci: CiStatus,
   blockedReason: z.string().optional(),
   summary: z.string().optional().describe('worker/lead summary of the result'),
+  costUsd: z.number().optional().describe('open: spend of this task (provider-reported, else estimated from the model price)'),
+  model: z.string().optional().describe('open: the model the task runs on'),
   createdBy: Id.describe('agent id or "user"'),
   createdAt: Ts,
   updatedAt: Ts,
@@ -408,6 +410,19 @@ export const DiffRequestMsg = z.object({
   worktree: Id.describe('worktree id (e.g. "kit-t2"); an agent id resolves to that agent\'s current worktree'),
 });
 export const RepoAddMsg = z.object({ ...envelope('repo.add'), path: z.string().min(1) });
+export const ModelInfo = z.object({
+  id: z.string().describe('the id to send as `model`, e.g. "openai/gpt-5-mini"'),
+  name: z.string(),
+  promptUsdPerM: z.number().optional().describe('USD per million input tokens (absent: unknown, e.g. a local server)'),
+  completionUsdPerM: z.number().optional().describe('USD per million output tokens'),
+  contextLength: z.number().int().optional(),
+  tools: z.boolean().optional().describe('the model supports tool calling (absent: unknown)'),
+});
+export type ModelInfo = z.infer<typeof ModelInfo>;
+export const ModelsListMsg = z.object({
+  ...envelope('models.list'),
+  refresh: z.boolean().optional().describe('fetch again instead of the cached list (cached ~10 minutes)'),
+});
 
 export const ClientMessage = z.discriminatedUnion('type', [
   HelloMsg,
@@ -418,6 +433,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
   AgentActionMsg,
   DiffRequestMsg,
   RepoAddMsg,
+  ModelsListMsg,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -490,6 +506,7 @@ export const CLIENT_MESSAGES = {
   'task.action': { schema: TaskActionMsg, doc: 'Steer a task from the Task Wall.' },
   'agent.action': { schema: AgentActionMsg, doc: 'Pause/resume/stop an agent, or spawn (activate) an off-shift worker.' },
   'diff.request': { schema: DiffRequestMsg, doc: 'Ask for the structured diff of a worktree. Answered with `diff` (same requestId).' },
+  'models.list': { schema: ModelsListMsg, doc: 'open backend: the models its endpoint offers (OpenRouter: with prices). The ack result is `{models: ModelInfo[]}`, tool-capable models first.' },
   'repo.add': { schema: RepoAddMsg, doc: 'Register a local git repo (console: `/repo add <path>`).' },
 } as const;
 

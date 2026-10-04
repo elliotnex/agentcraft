@@ -7,6 +7,7 @@ import dev.agentcraft.client.foreman.Hub;
 import dev.agentcraft.client.foreman.Hubs;
 import dev.agentcraft.client.foreman.Protocol.Ack;
 import dev.agentcraft.client.foreman.Protocol.ForemanStatus;
+import dev.agentcraft.client.foreman.Protocol.ModelInfo;
 import dev.agentcraft.client.foreman.Protocol.Repo;
 import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.hud.UiBits;
@@ -31,18 +32,26 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The freelancer's terminal (the console terminal in the plaza pavilion): pick a model (any id the
- * endpoint knows; a few presets one click away), a repository from any hub's project, task or
- * question, type the request and send it to Scout. Below: Scout's recent jobs with their status, and
- * the latest answer. Scout's own Foreman runs the open backend (OpenRouter by default).
+ * The freelancer's terminal (the console terminal in the plaza pavilion): pick a model (type any id,
+ * click a preset, or browse the endpoint's live catalog with prices), a repository from any hub's
+ * project, task or question, type the request and send it to Scout. Below: Scout's recent jobs with
+ * status, model and cost. Scout's own Foreman runs the open backend (OpenRouter by default) and
+ * serves the model list ({@code models.list}).
  */
 public class FreelanceScreen extends Screen {
 	private static final int W = 360;
-	/** One click away; any other OpenRouter (or local) model id can be typed in the field. */
+	private static final int ROW_H = 12;
+	/** One click away; any other id can be typed, or picked from the live list. */
 	static final List<String> PRESETS = List.of("openai/gpt-5-mini", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-flash", "deepseek/deepseek-chat-v3.1",
 		"qwen/qwen3-coder");
 	private static @Nullable String lastRepoPath;
 	private static boolean lastAsk;
+	/** The live catalog, shared by every open of the screen (refetched after ten minutes). */
+	private static List<ModelInfo> catalog = List.of();
+	private static long catalogAt;
+	private static @Nullable String catalogError;
+	private static boolean catalogLoading;
+	private static boolean toolsOnly = true;
 
 	private record Btn(String action, int arg, int x, int y, int w, int h) {
 		boolean hit(double mx, double my) {
@@ -57,6 +66,10 @@ public class FreelanceScreen extends Screen {
 	private final List<Btn> buttons = new ArrayList<>();
 	private @Nullable EditBox model;
 	private @Nullable EditBox request;
+	private @Nullable EditBox search;
+	private boolean browsing;
+	private int listScroll;
+	private int listMax;
 	private boolean ask = lastAsk;
 	private int repoIndex;
 	private String note = "";
@@ -82,13 +95,21 @@ public class FreelanceScreen extends Screen {
 		Kit.Padding pad = Kit.padding("panel_paper");
 		inner = W - pad.left() - pad.right();
 		px = (width - W) / 2;
-		py = Math.max(4, (height - 236) / 2);
+		py = Math.max(4, (height - 260) / 2);
 		int x = px + pad.left();
 		int y = py + pad.top();
+		loadCatalog(false);
+		if (browsing) {
+			String q = search != null ? search.getValue() : "";
+			search = addRenderableWidget(field(x + 4, y + 25, inner - 8, q, 80, "Search models"));
+			setFocused(search);
+			search.setFocused(true);
+			return;
+		}
 		String current = model != null ? model.getValue() : currentModel();
 		model = addRenderableWidget(field(x + 54, y + 25, inner - 58, current, 200, "Model"));
 		String req = request != null ? request.getValue() : "";
-		request = addRenderableWidget(field(x + 4, y + 110, inner - 8, req, 2000, "Request"));
+		request = addRenderableWidget(field(x + 4, y + 122, inner - 8, req, 2000, "Request"));
 		setFocused(request);
 		request.setFocused(true);
 		List<RepoChoice> repos = repos();
@@ -114,6 +135,84 @@ public class FreelanceScreen extends Screen {
 		Hub h = hub();
 		ForemanStatus st = h == null ? null : h.state().status();
 		return st != null && st.model() != null ? st.model() : PRESETS.getFirst();
+	}
+
+	/** Fetch the catalog from Scout's Foreman when it is missing or old (or {@code force}). Client thread. */
+	static void loadCatalog(boolean force) {
+		Hub h = hub();
+		if (catalogLoading || h == null || !h.connected()) {
+			return;
+		}
+		if (!force && !catalog.isEmpty() && System.currentTimeMillis() - catalogAt < 10 * 60_000) {
+			return;
+		}
+		catalogLoading = true;
+		Foreman.listModels(h, force).whenComplete((list, err) -> {
+			catalogLoading = false;
+			if (err != null) {
+				catalogError = err.getCause() != null ? err.getCause().getMessage() : err.getMessage();
+			} else {
+				catalog = List.copyOf(list);
+				catalogAt = System.currentTimeMillis();
+				catalogError = null;
+			}
+		});
+	}
+
+	static List<ModelInfo> catalog() {
+		return catalog;
+	}
+
+	static @Nullable ModelInfo info(String id) {
+		for (ModelInfo m : catalog) {
+			if (m.id().equals(id)) {
+				return m;
+			}
+		}
+		return null;
+	}
+
+	/** "$0.25 in · $2.00 out per M" | "free" | "" (unknown). */
+	static String price(@Nullable ModelInfo m) {
+		if (m == null || m.promptUsdPerM() == null || m.completionUsdPerM() == null) {
+			return "";
+		}
+		if (m.free()) {
+			return "free";
+		}
+		return "$" + usd(m.promptUsdPerM()) + " in · $" + usd(m.completionUsdPerM()) + " out per M";
+	}
+
+	private static String usd(double v) {
+		return v >= 10 ? String.format(Locale.ROOT, "%.0f", v) : v >= 0.1 ? String.format(Locale.ROOT, "%.2f", v) : String.format(Locale.ROOT, "%.3f", v);
+	}
+
+	private static String context(@Nullable Integer n) {
+		if (n == null) {
+			return "";
+		}
+		return n >= 1_000_000 ? String.format(Locale.ROOT, "%.1fM ctx", n / 1_000_000.0).replace(".0M", "M") : (n / 1000) + "K ctx";
+	}
+
+	/** The catalog filtered by the search words (each must appear in the id or name) and the tools switch. */
+	List<ModelInfo> filtered() {
+		String q = search == null ? "" : search.getValue().trim().toLowerCase(Locale.ROOT);
+		String[] words = q.isEmpty() ? new String[0] : q.split("\\s+");
+		List<ModelInfo> out = new ArrayList<>();
+		for (ModelInfo m : catalog) {
+			if (toolsOnly && Boolean.FALSE.equals(m.tools())) {
+				continue;
+			}
+			String hay = (m.id() + " " + m.name()).toLowerCase(Locale.ROOT);
+			boolean all = true;
+			for (String w : words) {
+				all &= hay.contains(w);
+			}
+			if (all) {
+				out.add(m);
+			}
+		}
+		return out;
 	}
 
 	/** Every repository of every hub's project (by path, first hub wins), the freelancer's own included. */
@@ -145,6 +244,10 @@ public class FreelanceScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partial) {
 		buttons.clear();
+		if (browsing) {
+			drawPicker(g, mouseX, mouseY, partial);
+			return;
+		}
 		int ink = UiBits.ink();
 		int muted = UiBits.muted();
 		Kit.Padding pad = Kit.padding("panel_paper");
@@ -152,36 +255,42 @@ public class FreelanceScreen extends Screen {
 		ForemanState s = hub == null ? null : hub.state();
 		boolean live = hub != null && hub.connected() && s.hasData();
 		List<Task> jobs = live ? recent(s) : List.of();
-		int h = pad.top() + 150 + Math.max(1, jobs.size()) * 12 + 18 + pad.bottom();
+		int h = pad.top() + 162 + Math.max(1, jobs.size()) * ROW_H + 18 + pad.bottom();
 		Panels.panel(g, px, py, W, h);
 		int x = px + pad.left();
 		int y = py + pad.top();
-		// ---- header: Scout, the model it runs on, the connection and spend
+		// ---- header: Scout, the connection and spend
 		ForemanStatus st = s == null ? null : s.status();
 		String state = hub == null ? "no pavilion" : !live ? "Foreman " + (hub.state().link().everSynced() ? "reconnecting" : "starting...") : st != null
 			&& st.auth().wire().equals("failed") ? "needs setup" : "ready";
-		String spend = st != null && st.costUsd() != null && st.costUsd() > 0 ? String.format(Locale.ROOT, "  ·  $%.3f spent", st.costUsd()) : "";
+		String spend = st != null && st.costUsd() != null && st.costUsd() > 0 ? String.format(Locale.ROOT, "  ·  $%.4f spent", st.costUsd()) : "";
 		Panels.header(g, font, "Scout  ·  freelancer  ·  " + state + spend, x, y, inner);
 		y += 22;
-		// ---- model: free text, presets below
+		// ---- model: free text, its price, presets and the live list
 		Panels.text(g, font, "Model", x, y + 4, muted);
 		g.fill(x + 50, y + 1, x + inner, y + 16, UiStyle.withAlpha(UiStyle.WALNUT, 24));
+		String typed = model == null ? "" : model.getValue().trim();
+		ModelInfo cur = info(typed);
+		String priceLine = cur != null ? join(cur.name(), price(cur), context(cur.contextLength()), Boolean.FALSE.equals(cur.tools()) ? "no tool calling!" : "")
+			: catalog.isEmpty() ? catalogLoading ? "loading the model list..." : catalogError != null ? "model list: " + catalogError : ""
+				: typed.isEmpty() ? "" : "not in the list (it may still work)";
+		Panels.text(g, font, TextUtil.ellipsize(font, priceLine, inner - 50), x + 50, y + 19, cur != null && Boolean.FALSE.equals(cur.tools()) ? UiStyle.CLAY_DARK : muted);
 		int cx = x + 50;
-		int cy = y + 19;
+		int cy = y + 31;
+		String browse = catalog.isEmpty() ? "Browse" : "Browse " + countTools() + " models";
+		int browseW = font.width(browse) + 8;
 		for (int i = 0; i < PRESETS.size(); i++) {
 			String label = shortModel(PRESETS.get(i));
 			int bw = font.width(label) + 8;
-			if (cx + bw > x + inner) {
+			if (cx + bw > x + inner - browseW - 4) {
 				break;
 			}
-			boolean on = model != null && model.getValue().equals(PRESETS.get(i));
-			boolean hover = mouseX >= cx && mouseX < cx + bw && mouseY >= cy && mouseY < cy + 12;
-			g.fill(cx, cy, cx + bw, cy + 12, on ? UiStyle.withAlpha(UiStyle.TEAL, 90) : UiStyle.withAlpha(UiStyle.WALNUT, hover ? 60 : 30));
-			Panels.text(g, font, label, cx + 4, cy + 2, on ? ink : muted);
-			buttons.add(new Btn("preset", i, cx, cy, bw, 12));
+			boolean on = typed.equals(PRESETS.get(i));
+			chip(g, label, cx, cy, bw, on, "preset", i, mouseX, mouseY);
 			cx += bw + 4;
 		}
-		y += 38;
+		chip(g, browse, x + inner - browseW, cy, browseW, false, "browse", 0, mouseX, mouseY);
+		y += 50;
 		// ---- repository: cycle through every hub's projects
 		List<RepoChoice> repos = repos();
 		Panels.text(g, font, "Repo", x, y + 6, muted);
@@ -210,7 +319,7 @@ public class FreelanceScreen extends Screen {
 		String hint = !note.isEmpty() ? note : setupHint(hub, st);
 		Panels.text(g, font, TextUtil.ellipsize(font, hint, inner - sw - 8), x, y + 6, noteBad ? UiStyle.CLAY_DARK : muted);
 		y += 26;
-		// ---- recent jobs
+		// ---- recent jobs: status, model, cost
 		Panels.divider(g, x, y - 4, inner);
 		if (jobs.isEmpty()) {
 			Panels.text(g, font, live ? "No jobs yet. Scout takes one at a time." : "Scout's jobs show here once its Foreman is up.", x, y + 2, muted);
@@ -227,11 +336,99 @@ public class FreelanceScreen extends Screen {
 			Panels.dot(g, fam, x + 1, y + 3, false);
 			String line = t.title() + (t.summary() != null && !t.summary().isBlank() ? "  —  " + UiBits.oneLine(t.summary()) : t.blockedReason() != null
 				? "  —  " + t.blockedReason() : "");
-			String right = status.equals("review") ? "review: J" : status;
+			String right = join(t.model() != null ? shortModel(t.model()) : "", t.costUsd() != null && t.costUsd() > 0 ? String.format(Locale.ROOT, "$%.4f",
+				t.costUsd()) : "", status.equals("review") ? "review: J" : status);
 			Panels.text(g, font, TextUtil.ellipsize(font, line, inner - 14 - font.width(right) - 8), x + 12, y + 2, ink);
 			Panels.text(g, font, right, x + inner - font.width(right), y + 2, muted);
-			y += 12;
+			y += ROW_H;
 		}
+	}
+
+	/** The live model list: search, the tools switch, rows with name, price and context; a click picks one. */
+	private void drawPicker(GuiGraphicsExtractor g, int mouseX, int mouseY, float partial) {
+		int ink = UiBits.ink();
+		int muted = UiBits.muted();
+		Kit.Padding pad = Kit.padding("panel_paper");
+		int h = Math.min(height - 8, 300);
+		int top = Math.max(4, (height - h) / 2);
+		py = top;
+		Panels.panel(g, px, top, W, h);
+		int x = px + pad.left();
+		int y = top + pad.top();
+		List<ModelInfo> list = filtered();
+		String src = hub() != null && hub().state().status() != null && hub().state().status().account() != null ? hub().state().status().account() : "the endpoint";
+		Panels.header(g, font, "Models  ·  " + list.size() + (toolsOnly ? " that can use tools" : "") + "  ·  " + src, x, y, inner);
+		y += 22;
+		// search field (the widget sits at init's y + 25: keep the panel's top where init put it)
+		if (search != null) {
+			search.setY(y + 3);
+		}
+		g.fill(x, y, x + inner, y + 15, UiStyle.withAlpha(UiStyle.WALNUT, 24));
+		if (search != null && search.getValue().isEmpty()) {
+			Panels.text(g, font, "search: gpt, claude sonnet, free, qwen coder...", x + 4, y + 4, muted);
+		}
+		super.extractRenderState(g, mouseX, mouseY, partial);
+		y += 20;
+		int listTop = y;
+		int footer = 26;
+		int listH = top + h - pad.bottom() - footer - listTop;
+		int rows = Math.max(1, listH / ROW_H);
+		listMax = Math.max(0, list.size() - rows);
+		listScroll = Math.max(0, Math.min(listScroll, listMax));
+		if (list.isEmpty()) {
+			String why = catalogLoading ? "Loading the model list..." : catalogError != null ? "Couldn't load the list: " + catalogError
+				: catalog.isEmpty() ? "No list yet (is Scout's Foreman running?)" : "Nothing matches.";
+			Panels.text(g, font, TextUtil.ellipsize(font, why, inner), x, y + 2, muted);
+		}
+		String typed = model == null ? "" : model.getValue().trim();
+		for (int i = listScroll; i < Math.min(list.size(), listScroll + rows); i++) {
+			ModelInfo m = list.get(i);
+			int ry = listTop + (i - listScroll) * ROW_H;
+			boolean hover = mouseX >= x && mouseX < x + inner && mouseY >= ry && mouseY < ry + ROW_H;
+			if (hover || m.id().equals(typed)) {
+				g.fill(x - 2, ry, x + inner + 2, ry + ROW_H, UiStyle.withAlpha(m.id().equals(typed) ? UiStyle.TEAL : UiStyle.WALNUT, hover ? 60 : 40));
+			}
+			String right = join(price(m), context(m.contextLength()));
+			int rw = font.width(right);
+			Panels.text(g, font, TextUtil.ellipsize(font, m.name(), inner - rw - 10), x + 2, ry + 2, Boolean.FALSE.equals(m.tools()) ? muted : ink);
+			Panels.text(g, font, right, x + inner - rw, ry + 2, m.free() ? UiStyle.SAGE : muted);
+			buttons.add(new Btn("pick", i, x - 2, ry, inner + 4, ROW_H));
+		}
+		int fy = top + h - pad.bottom() - 20;
+		int bx = x;
+		bx += button(g, "tools", 0, toolsOnly ? "Tools only: on" : "Tools only: off", bx, fy, false, mouseX, mouseY) + 6;
+		bx += button(g, "refresh", 0, catalogLoading ? "Loading..." : "Refresh", bx, fy, false, mouseX, mouseY) + 6;
+		String back = "Back";
+		button(g, "back", 0, back, x + inner - UiBits.buttonWidth(font, back, 0), fy, true, mouseX, mouseY);
+		String more = listMax > 0 ? (listScroll + 1) + "-" + Math.min(list.size(), listScroll + rows) + " of " + list.size() : "";
+		Panels.text(g, font, more, bx + 4, fy + 6, muted);
+	}
+
+	private int countTools() {
+		int n = 0;
+		for (ModelInfo m : catalog) {
+			if (!Boolean.FALSE.equals(m.tools())) {
+				n++;
+			}
+		}
+		return n;
+	}
+
+	private void chip(GuiGraphicsExtractor g, String label, int x, int y, int w, boolean on, String action, int arg, int mx, int my) {
+		boolean hover = mx >= x && mx < x + w && my >= y && my < y + 12;
+		g.fill(x, y, x + w, y + 12, on ? UiStyle.withAlpha(UiStyle.TEAL, 90) : UiStyle.withAlpha(UiStyle.WALNUT, hover ? 60 : 30));
+		Panels.text(g, font, label, x + 4, y + 2, on ? UiBits.ink() : UiBits.muted());
+		buttons.add(new Btn(action, arg, x, y, w, 12));
+	}
+
+	private static String join(String... parts) {
+		StringBuilder b = new StringBuilder();
+		for (String p : parts) {
+			if (p != null && !p.isEmpty()) {
+				b.append(b.length() == 0 ? "" : "  ·  ").append(p);
+			}
+		}
+		return b.toString();
 	}
 
 	private static String setupHint(@Nullable Hub hub, @Nullable ForemanStatus st) {
@@ -278,21 +475,77 @@ public class FreelanceScreen extends Screen {
 	}
 
 	@Override
+	public boolean mouseScrolled(double mx, double my, double dx, double dy) {
+		if (browsing) {
+			listScroll = Math.max(0, Math.min(listMax, listScroll - (int) Math.signum(dy) * 3));
+			return true;
+		}
+		return super.mouseScrolled(mx, my, dx, dy);
+	}
+
+	@Override
 	public boolean keyPressed(KeyEvent event) {
-		if ((event.key() == InputConstants.KEY_RETURN || event.key() == InputConstants.KEY_NUMPADENTER) && getFocused() == request) {
+		int k = event.key();
+		if (browsing) {
+			if (k == InputConstants.KEY_ESCAPE) {
+				press("back", 0);
+				return true;
+			}
+			if (k == InputConstants.KEY_RETURN || k == InputConstants.KEY_NUMPADENTER) {
+				// Enter picks the first match
+				press("pick", listScroll);
+				return true;
+			}
+			boolean handled = super.keyPressed(event);
+			listScroll = 0;
+			return handled;
+		}
+		if ((k == InputConstants.KEY_RETURN || k == InputConstants.KEY_NUMPADENTER) && getFocused() == request) {
 			press("send", 0);
 			return true;
 		}
 		return super.keyPressed(event);
 	}
 
-	/** preset n | repo 0/1 (back/next) | mode 0/1 (task/ask) | send. Also the dev command. */
+	@Override
+	public boolean charTyped(net.minecraft.client.input.CharacterEvent event) {
+		boolean r = super.charTyped(event);
+		if (browsing) {
+			listScroll = 0;
+		}
+		return r;
+	}
+
+	/** preset n | browse | pick n | tools | refresh | back | repo 0/1 | mode 0/1 | send. Also the dev command. */
 	void press(String action, int arg) {
 		switch (action) {
 			case "preset" -> {
 				if (model != null && arg >= 0 && arg < PRESETS.size()) {
 					model.setValue(PRESETS.get(arg));
 				}
+			}
+			case "browse" -> {
+				browsing = true;
+				listScroll = 0;
+				loadCatalog(false);
+				rebuildWidgets();
+			}
+			case "pick" -> {
+				List<ModelInfo> list = filtered();
+				if (arg >= 0 && arg < list.size() && model != null) {
+					model.setValue(list.get(arg).id());
+					browsing = false;
+					rebuildWidgets();
+				}
+			}
+			case "tools" -> {
+				toolsOnly = !toolsOnly;
+				listScroll = 0;
+			}
+			case "refresh" -> loadCatalog(true);
+			case "back" -> {
+				browsing = false;
+				rebuildWidgets();
 			}
 			case "repo" -> {
 				List<RepoChoice> repos = repos();
@@ -315,6 +568,21 @@ public class FreelanceScreen extends Screen {
 		if (request != null) {
 			request.setValue(text);
 		}
+	}
+
+	void setSearch(String text) {
+		if (search != null) {
+			search.setValue(text);
+			listScroll = 0;
+		}
+	}
+
+	boolean browsing() {
+		return browsing;
+	}
+
+	@Nullable String modelValue() {
+		return model == null ? null : model.getValue();
 	}
 
 	private void send() {
@@ -358,8 +626,9 @@ public class FreelanceScreen extends Screen {
 			} else if (!ack.ok()) {
 				fail(ack.error() != null ? ack.error() : "Scout couldn't take it");
 			} else {
-				note = (ask ? "Asked Scout" : "Sent to Scout") + " on " + shortModel(m != null ? m : currentModel()) + (ask ? ": the answer comes in chat"
-					: ": you'll get a merge to review");
+				ModelInfo mi = info(m != null ? m : currentModel());
+				note = (ask ? "Asked Scout" : "Sent to Scout") + " on " + shortModel(m != null ? m : currentModel()) + (mi != null && !price(mi).isEmpty() ? " ("
+					+ price(mi) + ")" : "") + (ask ? ": the answer comes in chat" : ": you'll get a merge to review");
 				noteBad = false;
 				if (request != null) {
 					request.setValue("");

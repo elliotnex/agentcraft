@@ -38,6 +38,8 @@ export interface TaskPatch {
   summary?: string;
   blockedReason?: string | null;
   repoId?: string;
+  costUsd?: number;
+  model?: string;
 }
 
 const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
@@ -124,6 +126,8 @@ export class TaskGraph {
     if (patch.ci !== undefined) t.ci = patch.ci;
     if (patch.summary !== undefined) t.summary = patch.summary;
     if (patch.repoId !== undefined) t.repoId = patch.repoId;
+    if (patch.costUsd !== undefined) t.costUsd = Math.round(patch.costUsd * 1e6) / 1e6;
+    if (patch.model !== undefined) t.model = patch.model;
     if (patch.blockedReason !== undefined) {
       if (patch.blockedReason === null) delete t.blockedReason;
       else t.blockedReason = patch.blockedReason;

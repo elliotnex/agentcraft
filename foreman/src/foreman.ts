@@ -20,6 +20,7 @@ import type {
   Goal,
   GoalStatus,
   GoalMode,
+  ModelInfo,
   BackendName,
   LogEntry,
   LogKind,
@@ -50,6 +51,8 @@ export interface Backend {
   onMergeConflict?(task: Task, info: { base: string; branch: string; files: string[]; reason: string }): boolean;
   onTaskAction(task: Task, action: 'reassign' | 'cancel' | 'retry' | 'prioritize', arg?: string): void;
   onAgentAction(agentId: string, action: 'pause' | 'resume' | 'stop' | 'spawn', arg?: string): Promise<void> | void;
+  /** open: the models the endpoint offers (models.list). */
+  listModels?(refresh?: boolean): Promise<ModelInfo[]>;
 }
 
 export type Reply = (msg: Outbound) => void;
@@ -534,6 +537,10 @@ export class Foreman {
           reply({ type: 'diff', requestId: msg.requestId, repoId: msg.repoId, worktree: msg.worktree, files: [], stats: { files: 0, additions: 0, deletions: 0 }, truncated: false, error: (e as Error).message });
         }
         return undefined;
+      }
+      case 'models.list': {
+        if (!this.backend?.listModels) throw new ClientError(`the ${this.config.backend} backend has no model list`);
+        return { models: await this.backend.listModels(msg.refresh) };
       }
       case 'repo.add': {
         const r = await this.repos.add(msg.path);

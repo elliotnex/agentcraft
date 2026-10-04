@@ -7,12 +7,23 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OpenBackend } from '../src/agents/open/index.js';
 import type { ChatMessage, CompleteFn, ToolCall } from '../src/agents/open/client.js';
+import { estimateCost, parseModels } from '../src/agents/open/models.js';
 import { demoRepo, makeForeman, rmrf, tempDir, until, type Harness } from './helpers.js';
 
 let h: Harness;
 let home: string;
 let repoPath: string;
 let backend: OpenBackend;
+let catalogFetches = 0;
+/** The shape OpenRouter's GET /api/v1/models returns (trimmed). */
+const OPENROUTER_SAMPLE = {
+  data: [
+    { id: 'meta-llama/llama-3-8b', name: 'Llama 3 8B', pricing: { prompt: '0.00000003', completion: '0.00000006' }, context_length: 8192, supported_parameters: ['temperature'] },
+    { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5', pricing: { prompt: '0.000003', completion: '0.000015' }, context_length: 1000000, supported_parameters: ['tools', 'tool_choice'] },
+    { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' }, supported_parameters: ['tools'] },
+    { id: 'test/priced', name: 'Priced', pricing: { prompt: '0.000001', completion: '0.000002' }, supported_parameters: ['tools'] },
+  ],
+};
 const seen: Array<{ model: string; messages: ChatMessage[] }> = [];
 
 let callNo = 0;
@@ -26,7 +37,7 @@ const fake: CompleteFn = async ({ model, messages }) => {
   seen.push({ model, messages: [...messages] });
   const req = userText(messages);
   const steps = messages.filter((x) => x.role === 'assistant').length;
-  const reply = (message: ChatMessage) => ({ message, costUsd: 0.001, tokensIn: 100, tokensOut: 20 });
+  const reply = (message: ChatMessage) => ({ message, ...(model === 'test/priced' ? {} : { costUsd: 0.001 }), tokensIn: 100, tokensOut: 20 });
 
   if (req.includes('Document the --version flag')) {
     const followups = messages.filter((x) => x.role === 'user' && x.content?.includes('requested changes')).length;
@@ -60,7 +71,10 @@ beforeAll(async () => {
   home = tempDir();
   repoPath = await demoRepo();
   h = makeForeman(home, ['--backend', 'open', '--repo', repoPath, '--ci', 'git --version', '--auto-approve', 'off']);
-  backend = new OpenBackend(h.fm, h.cfg.open, fake, { OPENROUTER_API_KEY: 'test-key' });
+  backend = new OpenBackend(h.fm, h.cfg.open, fake, { OPENROUTER_API_KEY: 'test-key' }, async () => {
+    catalogFetches++;
+    return parseModels(OPENROUTER_SAMPLE);
+  });
   await h.fm.start(backend);
 });
 
@@ -170,5 +184,42 @@ describe('open backend', () => {
     expect(h2.fm.status.message).toContain('OPENROUTER_API_KEY');
     await h2.fm.close();
     rmrf(h2.home);
+  });
+});
+
+describe('open backend: models and cost', () => {
+  it('parses the OpenRouter catalog: prices per million, tools first, unknown prices left out', () => {
+    const m = parseModels(OPENROUTER_SAMPLE);
+    expect(m.map((x) => x.id)).toEqual(['anthropic/claude-sonnet-4.5', 'openrouter/auto', 'test/priced', 'meta-llama/llama-3-8b']);
+    expect(m[0]).toEqual({ id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5', promptUsdPerM: 3, completionUsdPerM: 15, contextLength: 1000000, tools: true });
+    expect(m[1]!.promptUsdPerM).toBeUndefined();
+    expect(m[3]!.tools).toBe(false);
+    // a plain OpenAI-style list (Ollama): ids only
+    expect(parseModels({ data: [{ id: 'llama3.1' }] })).toEqual([{ id: 'llama3.1', name: 'llama3.1' }]);
+    expect(estimateCost(m[0], 1_000_000, 100_000)).toBeCloseTo(4.5);
+    expect(estimateCost(m[1], 10, 10)).toBeUndefined();
+  });
+
+  it('answers models.list from a cache, and refreshes on request', async () => {
+    const acks: Array<Record<string, unknown>> = [];
+    const before = catalogFetches;
+    await h.fm.handle({ type: 'models.list', id: 'q1' } as never, (m) => acks.push(m as never));
+    await h.fm.handle({ type: 'models.list', id: 'q2' } as never, (m) => acks.push(m as never));
+    expect(catalogFetches).toBe(before); // fetched once at start, cached since
+    await h.fm.handle({ type: 'models.list', id: 'q3', refresh: true } as never, (m) => acks.push(m as never));
+    expect(catalogFetches).toBe(before + 1);
+    const res = acks[0] as { ok: boolean; result: { models: Array<{ id: string }> } };
+    expect(res.ok).toBe(true);
+    expect(res.result.models[0]!.id).toBe('anthropic/claude-sonnet-4.5');
+  });
+
+  it('records each task\'s model and cost; estimates it from the price when the provider reports none', async () => {
+    const goal = await h.fm.submitGoal('? Which file parses tags (priced)', undefined, { model: 'test/priced' });
+    const t = h.fm.tasks.forGoal(goal.id)[0]!;
+    await until(() => h.fm.tasks.get(t.id)!.status === 'done', 30_000);
+    const task = h.fm.tasks.get(t.id)!;
+    expect(task.model).toBe('test/priced');
+    // two calls x (100 in x $1/M + 20 out x $2/M) = $0.00028
+    expect(task.costUsd).toBeCloseTo(0.00028, 6);
   });
 });

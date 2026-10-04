@@ -109,6 +109,20 @@ public final class Foreman {
 		return hub.link().send(ForemanJson.msg("goal.submit").put("text", text).put("repoId", repoId).put("model", model).put("mode", mode).json());
 	}
 
+	/** The models {@code hub}'s Foreman (the open backend) can run, tool-capable first; {@code refresh} skips its cache. */
+	public static CompletableFuture<java.util.List<Protocol.ModelInfo>> listModels(Hub hub, boolean refresh) {
+		return hub.link().send(ForemanJson.msg("models.list").put("refresh", refresh ? Boolean.TRUE : null).json()).thenApply(ack -> {
+			if (!ack.ok() || ack.result() == null || !ack.result().has("models")) {
+				throw new IllegalStateException(ack.error() != null ? ack.error() : "no model list");
+			}
+			java.util.List<Protocol.ModelInfo> out = new java.util.ArrayList<>();
+			for (com.google.gson.JsonElement e : ack.result().getAsJsonArray("models")) {
+				out.add(ForemanJson.read(e, Protocol.ModelInfo.class));
+			}
+			return out;
+		});
+	}
+
 	public static CompletableFuture<Ack> addRepoTo(Hub hub, String path) {
 		return hub.link().send(ForemanJson.msg("repo.add").put("path", path).json());
 	}

@@ -28,9 +28,11 @@ public final class FreelanceFeature {
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> attach());
 		DevBridge.registerScreen("freelance", mc -> new FreelanceScreen());
 		DevBridge.register("dev.freelance", 15_000,
-			"{request?, press?: preset|repo|mode|send, arg?:0} - drive the open freelancer terminal (opens it first)", (req, mc) -> {
+			"{request?, search?, press?: preset|browse|pick|tools|refresh|back|repo|mode|send, arg?:0} - drive the open freelancer terminal (opens it first)",
+			(req, mc) -> {
 				Fields f = Fields.of(req);
 				String request = f.optStr("request", null);
+				String search = f.optStr("search", null);
 				String press = f.optStr("press", null);
 				int arg = f.optInt("arg", 0, 0, 99);
 				return DevBridge.onClient(mc, () -> {
@@ -44,12 +46,19 @@ public final class FreelanceFeature {
 					if (press != null) {
 						s.press(press, arg);
 					}
+					if (search != null) {
+						s.setSearch(search);
+					}
 					JsonObject o = new JsonObject();
 					Hub h = FreelanceScreen.hub();
 					o.addProperty("hub", h == null ? null : h.id());
 					o.addProperty("connected", h != null && h.connected());
 					o.addProperty("model", FreelanceScreen.currentModel());
 					o.addProperty("repos", FreelanceScreen.repos().size());
+					o.addProperty("browsing", s.browsing());
+					o.addProperty("field", s.modelValue());
+					o.addProperty("catalog", FreelanceScreen.catalog().size());
+					o.addProperty("matches", s.browsing() ? s.filtered().size() : -1);
 					return o;
 				});
 			});

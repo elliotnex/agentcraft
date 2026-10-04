@@ -149,8 +149,10 @@ public final class ConnectionBanner implements HudElement {
 	}
 
 	private static void drawAuthBanner(GuiGraphicsExtractor g, Font font, ForemanStatus fs) {
-		String head = "Claude backend can't authenticate";
-		String msg = fs.message() != null ? fs.message() : "run `claude` and /login, then restart the Foreman";
+		boolean open = fs.backend() == dev.agentcraft.client.foreman.Protocol.BackendName.OPEN;
+		String head = open ? "The freelancer needs setup" : "Claude backend can't authenticate";
+		String msg = fs.message() != null ? fs.message() : open ? "set OPENROUTER_API_KEY, then restart Scout's Foreman"
+			: "run `claude` and /login, then restart the Foreman";
 		int maxW = Math.min(360, g.guiWidth() - 40);
 		var lines = TextUtil.wrap(font, msg, maxW - 34);
 		Kit.Padding p = Kit.padding("panel_paper");
