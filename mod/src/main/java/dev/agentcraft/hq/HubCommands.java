@@ -24,7 +24,7 @@ import net.minecraft.server.level.ServerPlayer;
  * /agentcraft hub theme &lt;id&gt; &lt;theme&gt;    give a hub's studio another look and rebuild it
  *                                       (warm, cherry, birch, ember, midnight)
  * /agentcraft hub paths                 (re)build the roads and plaza between hubs
- * /agentcraft hub layout compass        turn a world of hubs in a line into a compass town
+ * /agentcraft hub layout compass        turn a world of hubs in a line into a compass town, or tighten an older (160-apart) one
  * </pre>
  * Creating, re-theming or rebuilding a hub also updates the paths.
  */

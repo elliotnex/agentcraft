@@ -29,11 +29,13 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Two town layouts:
  * <ul>
- *   <li><b>compass</b> (new worlds): a plaza centred on {@link #CENTER_X}, {@link #CENTER_Z}; ring 1 is
- *       eight spots {@link #SPACING} out on every side and corner, all facing in, and ring 2 the
- *       sixteen around those ({@link #SPOTS}). Main is the north spot (0, 0), where the original
- *       studio stands.</li>
- *   <li><b>line</b> (worlds from before the compass): each hub {@link #SPACING} further east, all
+ *   <li><b>compass</b> (new worlds): a plaza centred on {@link #CENTER_X}, {@link #centerZ()}; ring 1 is
+ *       eight spots {@link #spacing()} out on every side and corner, all facing in, and ring 2 the
+ *       sixteen around those ({@link #spots()}). Main is the north spot (0, 0), where the original
+ *       studio stands. New towns use {@link #COMPASS_SPACING}; towns built before it shrank keep
+ *       {@link #LINE_SPACING} (saved in the file as {@code spacing}) until
+ *       {@code /agentcraft hub layout compass} tightens them.</li>
+ *   <li><b>line</b> (worlds from before the compass): each hub {@link #LINE_SPACING} further east, all
  *       facing south. {@code /agentcraft hub layout compass} converts such a world.</li>
  * </ul>
  *
@@ -45,10 +47,11 @@ public final class HubRegistry {
 	public static final String MAIN = "main";
 	public static final String LINE = "line";
 	public static final String COMPASS = "compass";
-	/** Distance between neighbouring spots (the studio grounds are 93 x 91). */
-	public static final int SPACING = 160;
+	/** Distance between hubs in a line, and between compass spots in towns from before they shrank (the studio grounds are 93 x 91). */
+	public static final int LINE_SPACING = 160;
+	/** Distance between neighbouring compass spots in new towns: 27 blocks between studios side by side, 15-wide roads. */
+	public static final int COMPASS_SPACING = 120;
 	public static final int CENTER_X = 0;
-	public static final int CENTER_Z = SPACING;
 	/**
 	 * Fallback hub port for a hub record without one: {@code PORT_BASE + slot}. New hubs get the port
 	 * their project owns on this machine ({@link HubProfiles#portFor}); the main hub uses the client's
@@ -64,16 +67,14 @@ public final class HubRegistry {
 	public record Spot(int x, int z, char facing, int ring) {
 	}
 
-	/** Compass spots in the order new hubs take them: ring 1 (8), then ring 2 (16). Main is the first. */
-	public static final List<Spot> SPOTS = spots();
-
-	private static List<Spot> spots() {
+	/** Compass spots {@code s} apart in the order new hubs take them: ring 1 (8), then ring 2 (16). Main is the first. */
+	public static List<Spot> spotsFor(int s) {
 		List<Spot> out = new ArrayList<>();
-		int s = SPACING;
+		int cz = s; // the plaza is one spacing south of main
 		// ring 1: north (main), the north corners, east and west, then the south side
 		int[][] r1 = {{0, -1}, {1, -1}, {-1, -1}, {1, 0}, {-1, 0}, {0, 1}, {1, 1}, {-1, 1}};
 		for (int[] g : r1) {
-			out.add(new Spot(CENTER_X + g[0] * s, CENTER_Z + g[1] * s, facingIn(g[0], g[1], 1), 1));
+			out.add(new Spot(CENTER_X + g[0] * s, cz + g[1] * s, facingIn(g[0], g[1], 1), 1));
 		}
 		// ring 2: the perimeter of the 5 x 5 grid, north side first, clockwise
 		List<int[]> r2 = new ArrayList<>();
@@ -90,7 +91,7 @@ public final class HubRegistry {
 			r2.add(new int[] {-2, j});
 		}
 		for (int[] g : r2) {
-			out.add(new Spot(CENTER_X + g[0] * s, CENTER_Z + g[1] * s, facingIn(g[0], g[1], 2), 2));
+			out.add(new Spot(CENTER_X + g[0] * s, cz + g[1] * s, facingIn(g[0], g[1], 2), 2));
 		}
 		return List.copyOf(out);
 	}
@@ -145,6 +146,8 @@ public final class HubRegistry {
 	private static final Hub MAIN_HUB = new Hub(MAIN, "Main", 0, 0, "warm", 0, 0, 'S');
 	private static volatile List<Hub> hubs = List.of(MAIN_HUB);
 	private static volatile String layout = COMPASS;
+	private static volatile int spacing = COMPASS_SPACING;
+	private static volatile List<Spot> spots = spotsFor(COMPASS_SPACING);
 	private static volatile long revision;
 
 	private HubRegistry() {
@@ -158,6 +161,7 @@ public final class HubRegistry {
 		});
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			layout = COMPASS;
+			useSpacing(COMPASS_SPACING);
 			set(List.of(MAIN_HUB));
 		});
 	}
@@ -169,6 +173,26 @@ public final class HubRegistry {
 	/** {@link #COMPASS} or {@link #LINE}. */
 	public static String layout() {
 		return layout;
+	}
+
+	/** Distance between this world's compass spots ({@link #COMPASS_SPACING}, or {@link #LINE_SPACING} in an older town). */
+	public static int spacing() {
+		return spacing;
+	}
+
+	/** The plaza's centre z (x is {@link #CENTER_X}): one spacing south of main. */
+	public static int centerZ() {
+		return spacing;
+	}
+
+	/** This world's compass spots ({@link #spotsFor} at {@link #spacing()}). */
+	public static List<Spot> spots() {
+		return spots;
+	}
+
+	private static void useSpacing(int s) {
+		spacing = s;
+		spots = spotsFor(s);
 	}
 
 	/** Increases whenever the hub list changes (clients poll it to connect new hubs). */
@@ -203,7 +227,7 @@ public final class HubRegistry {
 
 	/** The next free compass spot, or null when both rings are full. */
 	public static @Nullable Spot freeSpot(List<Hub> taken) {
-		for (Spot s : SPOTS) {
+		for (Spot s : spots) {
 			boolean used = false;
 			for (Hub h : taken) {
 				if (h.x() == s.x() && h.z() == s.z()) {
@@ -220,7 +244,7 @@ public final class HubRegistry {
 
 	/** The compass spot at (x, z) facing {@code f}, or null. */
 	public static @Nullable Spot spotAt(int x, int z, char f) {
-		for (Spot s : SPOTS) {
+		for (Spot s : spots) {
 			if (s.x() == x && s.z() == z && s.facing() == f) {
 				return s;
 			}
@@ -247,11 +271,11 @@ public final class HubRegistry {
 		if (COMPASS.equals(layout)) {
 			Spot spot = freeSpot(hubs);
 			if (spot == null) {
-				throw new IllegalArgumentException("the town is full (" + SPOTS.size() + " hubs)");
+				throw new IllegalArgumentException("the town is full (" + spots.size() + " hubs)");
 			}
 			hub = new Hub(key, name.isBlank() ? key : name, slot, port, "warm", spot.x(), spot.z(), spot.facing());
 		} else {
-			hub = new Hub(key, name.isBlank() ? key : name, slot, port, "warm", slot * SPACING, 0, 'S');
+			hub = new Hub(key, name.isBlank() ? key : name, slot, port, "warm", slot * LINE_SPACING, 0, 'S');
 		}
 		List<Hub> next = new ArrayList<>(hubs);
 		next.add(hub);
@@ -274,6 +298,13 @@ public final class HubRegistry {
 	/** Switches the world's layout and saves (the caller moves hubs and rebuilds). Server thread. */
 	public static void setLayout(MinecraftServer server, String mode) {
 		layout = mode;
+		revision++;
+		save(server);
+	}
+
+	/** Changes the distance between compass spots and saves (the caller moves hubs and rebuilds). Server thread. */
+	public static void setSpacing(MinecraftServer server, int s) {
+		useSpacing(s);
 		revision++;
 		save(server);
 	}
@@ -322,6 +353,7 @@ public final class HubRegistry {
 		}
 		JsonObject root = new JsonObject();
 		root.addProperty("layout", layout);
+		root.addProperty("spacing", spacing);
 		root.add("hubs", arr);
 		Path f = file(server);
 		try {
@@ -339,11 +371,14 @@ public final class HubRegistry {
 		list.add(MAIN_HUB);
 		// a world from before hubs.json existed has one studio: it can go straight to the compass
 		String mode = COMPASS;
+		int s = COMPASS_SPACING;
 		if (Files.exists(f)) {
 			try {
 				JsonObject root = JsonParser.parseString(Files.readString(f, StandardCharsets.UTF_8)).getAsJsonObject();
 				// a hubs file without a layout predates the compass: its hubs stand in a line
 				mode = root.has("layout") ? root.get("layout").getAsString() : LINE;
+				// a file without a spacing predates the tighter town: its spots are 160 apart
+				s = root.has("spacing") ? root.get("spacing").getAsInt() : LINE_SPACING;
 				for (JsonElement e : root.getAsJsonArray("hubs")) {
 					JsonObject o = e.getAsJsonObject();
 					String id = o.get("id").getAsString();
@@ -356,7 +391,7 @@ public final class HubRegistry {
 						continue;
 					}
 					int slot = o.get("slot").getAsInt();
-					int x = o.has("x") ? o.get("x").getAsInt() : slot * SPACING;
+					int x = o.has("x") ? o.get("x").getAsInt() : slot * LINE_SPACING;
 					int z = o.has("z") ? o.get("z").getAsInt() : 0;
 					char facing = o.has("facing") ? o.get("facing").getAsString().charAt(0) : 'S';
 					list.add(new Hub(id, o.has("name") ? o.get("name").getAsString() : id, slot,
@@ -367,6 +402,7 @@ public final class HubRegistry {
 			}
 		}
 		layout = mode;
+		useSpacing(s);
 		set(List.copyOf(list));
 		// hubs made before ports.json existed: their projects own the ports they already use
 		for (Hub h : list) {
@@ -375,6 +411,6 @@ public final class HubRegistry {
 				HubProfiles.claim(profile, h.port());
 			}
 		}
-		AgentCraft.LOGGER.info("Hubs ({} layout): {}", layout, hubs.stream().map(Hub::id).toList());
+		AgentCraft.LOGGER.info("Hubs ({} layout, spacing {}): {}", layout, spacing, hubs.stream().map(Hub::id).toList());
 	}
 }

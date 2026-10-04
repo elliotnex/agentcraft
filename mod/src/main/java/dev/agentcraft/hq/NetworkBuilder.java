@@ -35,7 +35,7 @@ import net.minecraft.world.level.block.state.BlockState;
 final class NetworkBuilder {
 	static final String ID = "network";
 	/** A segment spans origin - HALF .. origin + HALF - 1 (adjacent segments meet without overlap). */
-	static final int HALF = HubRegistry.SPACING / 2;
+	static final int HALF = HubRegistry.LINE_SPACING / 2;
 	static final int GROUND = StudioHqBuilder.GROUND;
 	static final int Z0 = StudioHqBuilder.SITE[5] + 1;   // 55: just outside the studio grounds
 	/** The courtyard's width; the promenade is as wide. */

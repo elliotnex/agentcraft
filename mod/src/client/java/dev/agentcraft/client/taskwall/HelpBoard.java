@@ -67,7 +67,7 @@ final class HelpBoard {
 				new Row("/ac hub theme <id> <theme>", "warm, cherry, birch, ember, midnight"),
 				new Row("/ac hub build <id> [force]", "repair a studio (force: reset your changes too)"),
 				new Row("/ac hub paths", "rebuild the roads and this plaza"),
-				new Row("/ac hub layout compass", "turn hubs in a line into this town"),
+				new Row("/ac hub layout compass", "build this town from a line of hubs, or tighten an older one"),
 				new Row("/ac hq [force]", "repair the main studio")));
 			default -> new Page("AgentCraft", "", List.of());
 		};

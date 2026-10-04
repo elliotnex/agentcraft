@@ -16,7 +16,8 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * The compass town's ground: a road ring hugging the fronts of the eight ring-1 studios, the plaza
  * inside it (fountain, garden beds, benches and the hub wall), and once a ring-2 hub exists, an outer
- * road ring between the two rings of studios with eight spokes between the ring-1 studios.
+ * road ring between the two rings of studios with eight spokes between the ring-1 studios. Its
+ * measurements follow the world's spacing ({@link Geo}).
  *
  * <p>Built in pieces that never overlap a studio's grounds, each a sparse {@link Plan} with its own
  * record ({@code net-c-<piece>}), so rebuilds are diffs that keep the player's changes and a first
@@ -26,22 +27,35 @@ final class CompassNetwork {
 	static final int GROUND = StudioHqBuilder.GROUND;
 	static final int Y0 = GROUND - 4;
 	static final int Y1 = GROUND + 12;
-	static final int CX = HubRegistry.CENTER_X;
-	static final int CZ = HubRegistry.CENTER_Z;
-	static final int S = HubRegistry.SPACING;
-	/** Road width. */
-	static final int W = 27;
-	/** The ring-1 studios' fronts are this far from the centre (160 - 54). */
-	static final int FRONT = S - HubRegistry.STUDIO_BOX[3];
-	/** Inner road ring: the band FRONT - W + 1 .. FRONT from the centre (hugging the fronts). */
-	static final int IN_OUT = FRONT - 1;          // 105
-	static final int IN_IN = FRONT - W;           // 79
-	/** The ring-1 corner studios reach this far out along the north and south roads. */
-	static final int CORNER_REACH = S - HubRegistry.STUDIO_BOX[0];  // 206
-	/** Outer road ring between ring-1 backs (196) and ring-2 fronts (266). */
-	static final int OUT_MID = (S - HubRegistry.STUDIO_BOX[1] + 2 * S - HubRegistry.STUDIO_BOX[3]) / 2; // 231
-	static final int OUT_IN = OUT_MID - W / 2;    // 218
-	static final int OUT_OUT = OUT_MID + W / 2;   // 244
+	/**
+	 * The town's measurements at one spacing {@code s} (distances from the centre unless named
+	 * otherwise). Towns at {@link HubRegistry#LINE_SPACING} keep their first shape (27-wide roads,
+	 * spokes at s / 2) so a rebuild there changes nothing; tighter towns have 15-wide roads, and the
+	 * spokes between a corner studio and the side studio next to it sit halfway across that gap.
+	 *
+	 * @param w        road width
+	 * @param inOut    inner road ring, outer edge (hugging the ring-1 fronts at s - 54)
+	 * @param inIn     inner road ring, inner edge (the plaza is inside it)
+	 * @param reach    how far the ring-1 corner studios reach along the north and south roads
+	 * @param outIn    outer road ring, inner edge (between ring 1 and the ring-2 fronts)
+	 * @param spokeX   x offset of the spokes between a side's middle and corner studios
+	 * @param spokeZ   z offset of the spokes between a corner studio and the east or west studio
+	 * @param bed      offset of the plaza's garden beds on each axis
+	 */
+	record Geo(int s, int cx, int cz, int w, int inOut, int inIn, int reach, int outIn, int outOut, int spokeX, int spokeZ, int bed) {
+		static Geo of(int s) {
+			boolean first = s >= HubRegistry.LINE_SPACING;
+			int w = first ? 27 : 15;
+			int front = s - HubRegistry.STUDIO_BOX[3];
+			// the outer ring runs between ring 1 and the ring-2 fronts (2s - 54): first towns centre it on the
+			// side studios' backs (s + 36), tighter ones on the corner studios' flanks (s + 46), which reach further
+			int ring1Out = first ? s - HubRegistry.STUDIO_BOX[1] : s + HubRegistry.STUDIO_BOX[2];
+			int outMid = (ring1Out + 2 * s - HubRegistry.STUDIO_BOX[3]) / 2;
+			int spokeZ = first ? s / 2 : (HubRegistry.STUDIO_BOX[2] + front) / 2;
+			return new Geo(s, HubRegistry.CENTER_X, HubRegistry.centerZ(), w, front - 1, front - w, s - HubRegistry.STUDIO_BOX[0],
+				outMid - w / 2, outMid + w / 2, s / 2, spokeZ, first ? 42 : 32);
+		}
+	}
 
 	private static final BlockState STONE = Blocks.STONE_BRICKS.defaultBlockState();
 	private static final BlockState MOSSY = Blocks.MOSSY_STONE_BRICKS.defaultBlockState();
@@ -62,6 +76,7 @@ final class CompassNetwork {
 		List<HubRegistry.Hub> hubs = new ArrayList<>(HubRegistry.all());
 		hubs.removeIf(h -> Anchors.of(h.id()).isEmpty());
 		hubs.sort((a, b) -> Integer.compare(a.slot(), b.slot()));
+		Geo g = Geo.of(HubRegistry.spacing());
 		List<int[]> gates = gates(hubs);
 		HubRegistry.Hub main = HubRegistry.get(HubRegistry.MAIN);
 		Theme theme = Theme.byId(main == null ? null : main.theme());
@@ -71,39 +86,39 @@ final class CompassNetwork {
 		});
 		List<Piece> pieces = new ArrayList<>();
 		// ---- ring 1: four road strips along the studio fronts, the plaza inside
-		pieces.add(new Piece("n", CX - CORNER_REACH, CZ - IN_OUT, CX + CORNER_REACH, CZ - IN_IN,
-			p -> road(p, CX - CORNER_REACH, CZ - IN_OUT, CX + CORNER_REACH, CZ - IN_IN, true, gates)));
-		pieces.add(new Piece("s", CX - CORNER_REACH, CZ + IN_IN, CX + CORNER_REACH, CZ + IN_OUT,
-			p -> road(p, CX - CORNER_REACH, CZ + IN_IN, CX + CORNER_REACH, CZ + IN_OUT, true, gates)));
-		pieces.add(new Piece("w", CX - IN_OUT, CZ - IN_IN + 1, CX - IN_IN, CZ + IN_IN - 1,
-			p -> road(p, CX - IN_OUT, CZ - IN_IN + 1, CX - IN_IN, CZ + IN_IN - 1, false, gates)));
-		pieces.add(new Piece("e", CX + IN_IN, CZ - IN_IN + 1, CX + IN_OUT, CZ + IN_IN - 1,
-			p -> road(p, CX + IN_IN, CZ - IN_IN + 1, CX + IN_OUT, CZ + IN_IN - 1, false, gates)));
-		int pz0 = CZ - IN_IN + 1, pz1 = CZ + IN_IN - 1, px0 = CX - IN_IN + 1, px1 = CX + IN_IN - 1;
-		pieces.add(new Piece("plaza", px0, pz0, px1, pz1, p -> plaza(p, px0, pz0, px1, pz1, hubs.size())));
+		pieces.add(new Piece("n", g.cx() - g.reach(), g.cz() - g.inOut(), g.cx() + g.reach(), g.cz() - g.inIn(),
+			p -> road(p, g.cx() - g.reach(), g.cz() - g.inOut(), g.cx() + g.reach(), g.cz() - g.inIn(), true, gates, g.w())));
+		pieces.add(new Piece("s", g.cx() - g.reach(), g.cz() + g.inIn(), g.cx() + g.reach(), g.cz() + g.inOut(),
+			p -> road(p, g.cx() - g.reach(), g.cz() + g.inIn(), g.cx() + g.reach(), g.cz() + g.inOut(), true, gates, g.w())));
+		pieces.add(new Piece("w", g.cx() - g.inOut(), g.cz() - g.inIn() + 1, g.cx() - g.inIn(), g.cz() + g.inIn() - 1,
+			p -> road(p, g.cx() - g.inOut(), g.cz() - g.inIn() + 1, g.cx() - g.inIn(), g.cz() + g.inIn() - 1, false, gates, g.w())));
+		pieces.add(new Piece("e", g.cx() + g.inIn(), g.cz() - g.inIn() + 1, g.cx() + g.inOut(), g.cz() + g.inIn() - 1,
+			p -> road(p, g.cx() + g.inIn(), g.cz() - g.inIn() + 1, g.cx() + g.inOut(), g.cz() + g.inIn() - 1, false, gates, g.w())));
+		int pz0 = g.cz() - g.inIn() + 1, pz1 = g.cz() + g.inIn() - 1, px0 = g.cx() - g.inIn() + 1, px1 = g.cx() + g.inIn() - 1;
+		pieces.add(new Piece("plaza", px0, pz0, px1, pz1, p -> plaza(p, g, px0, pz0, px1, pz1, hubs.size())));
 		// ---- ring 2: the outer ring and the spokes between the ring-1 studios
 		if (ring2) {
-			pieces.add(new Piece("on", CX - OUT_OUT, CZ - OUT_OUT, CX + OUT_OUT, CZ - OUT_IN,
-				p -> road(p, CX - OUT_OUT, CZ - OUT_OUT, CX + OUT_OUT, CZ - OUT_IN, true, gates)));
-			pieces.add(new Piece("os", CX - OUT_OUT, CZ + OUT_IN, CX + OUT_OUT, CZ + OUT_OUT,
-				p -> road(p, CX - OUT_OUT, CZ + OUT_IN, CX + OUT_OUT, CZ + OUT_OUT, true, gates)));
-			pieces.add(new Piece("ow", CX - OUT_OUT, CZ - OUT_IN + 1, CX - OUT_IN, CZ + OUT_IN - 1,
-				p -> road(p, CX - OUT_OUT, CZ - OUT_IN + 1, CX - OUT_IN, CZ + OUT_IN - 1, false, gates)));
-			pieces.add(new Piece("oe", CX + OUT_IN, CZ - OUT_IN + 1, CX + OUT_OUT, CZ + OUT_IN - 1,
-				p -> road(p, CX + OUT_IN, CZ - OUT_IN + 1, CX + OUT_OUT, CZ + OUT_IN - 1, false, gates)));
-			// spokes, centred halfway between neighbouring ring-1 studios (80 from the centre lines)
-			int half = W / 2;
+			pieces.add(new Piece("on", g.cx() - g.outOut(), g.cz() - g.outOut(), g.cx() + g.outOut(), g.cz() - g.outIn(),
+				p -> road(p, g.cx() - g.outOut(), g.cz() - g.outOut(), g.cx() + g.outOut(), g.cz() - g.outIn(), true, gates, g.w())));
+			pieces.add(new Piece("os", g.cx() - g.outOut(), g.cz() + g.outIn(), g.cx() + g.outOut(), g.cz() + g.outOut(),
+				p -> road(p, g.cx() - g.outOut(), g.cz() + g.outIn(), g.cx() + g.outOut(), g.cz() + g.outOut(), true, gates, g.w())));
+			pieces.add(new Piece("ow", g.cx() - g.outOut(), g.cz() - g.outIn() + 1, g.cx() - g.outIn(), g.cz() + g.outIn() - 1,
+				p -> road(p, g.cx() - g.outOut(), g.cz() - g.outIn() + 1, g.cx() - g.outIn(), g.cz() + g.outIn() - 1, false, gates, g.w())));
+			pieces.add(new Piece("oe", g.cx() + g.outIn(), g.cz() - g.outIn() + 1, g.cx() + g.outOut(), g.cz() + g.outIn() - 1,
+				p -> road(p, g.cx() + g.outIn(), g.cz() - g.outIn() + 1, g.cx() + g.outOut(), g.cz() + g.outIn() - 1, false, gates, g.w())));
+			// spokes between neighbouring ring-1 studios
+			int half = g.w() / 2;
 			for (int sgn : new int[] {-1, 1}) {
-				int sx = CX + sgn * S / 2;
-				pieces.add(new Piece("sn" + (sgn > 0 ? "e" : "w"), sx - half, CZ - OUT_IN + 1, sx + half, CZ - IN_OUT - 1,
-					p -> road(p, sx - half, CZ - OUT_IN + 1, sx + half, CZ - IN_OUT - 1, false, gates)));
-				pieces.add(new Piece("ss" + (sgn > 0 ? "e" : "w"), sx - half, CZ + IN_OUT + 1, sx + half, CZ + OUT_IN - 1,
-					p -> road(p, sx - half, CZ + IN_OUT + 1, sx + half, CZ + OUT_IN - 1, false, gates)));
-				int sz = CZ + sgn * S / 2;
-				pieces.add(new Piece("se" + (sgn > 0 ? "s" : "n"), CX + IN_OUT + 1, sz - half, CX + OUT_IN - 1, sz + half,
-					p -> road(p, CX + IN_OUT + 1, sz - half, CX + OUT_IN - 1, sz + half, true, gates)));
-				pieces.add(new Piece("sw" + (sgn > 0 ? "s" : "n"), CX - OUT_IN + 1, sz - half, CX - IN_OUT - 1, sz + half,
-					p -> road(p, CX - OUT_IN + 1, sz - half, CX - IN_OUT - 1, sz + half, true, gates)));
+				int sx = g.cx() + sgn * g.spokeX();
+				pieces.add(new Piece("sn" + (sgn > 0 ? "e" : "w"), sx - half, g.cz() - g.outIn() + 1, sx + half, g.cz() - g.inOut() - 1,
+					p -> road(p, sx - half, g.cz() - g.outIn() + 1, sx + half, g.cz() - g.inOut() - 1, false, gates, g.w())));
+				pieces.add(new Piece("ss" + (sgn > 0 ? "e" : "w"), sx - half, g.cz() + g.inOut() + 1, sx + half, g.cz() + g.outIn() - 1,
+					p -> road(p, sx - half, g.cz() + g.inOut() + 1, sx + half, g.cz() + g.outIn() - 1, false, gates, g.w())));
+				int sz = g.cz() + sgn * g.spokeZ();
+				pieces.add(new Piece("se" + (sgn > 0 ? "s" : "n"), g.cx() + g.inOut() + 1, sz - half, g.cx() + g.outIn() - 1, sz + half,
+					p -> road(p, g.cx() + g.inOut() + 1, sz - half, g.cx() + g.outIn() - 1, sz + half, true, gates, g.w())));
+				pieces.add(new Piece("sw" + (sgn > 0 ? "s" : "n"), g.cx() - g.outIn() + 1, sz - half, g.cx() - g.inOut() - 1, sz + half,
+					p -> road(p, g.cx() - g.outIn() + 1, sz - half, g.cx() - g.inOut() - 1, sz + half, true, gates, g.w())));
 			}
 		}
 		int changed = 0;
@@ -144,9 +159,9 @@ final class CompassNetwork {
 		return out;
 	}
 
-	private static boolean nearGate(List<int[]> gates, int x, int z, int r) {
+	private static boolean nearGate(List<int[]> gates, int x, int z, int r, int w) {
 		for (int[] g : gates) {
-			if (Math.abs(g[0] - x) <= r && Math.abs(g[1] - z) <= r + W) {
+			if (Math.abs(g[0] - x) <= r && Math.abs(g[1] - z) <= r + w) {
 				return true;
 			}
 		}
@@ -158,7 +173,7 @@ final class CompassNetwork {
 	 * edges, a smooth centre line, cross bands every 9, lantern posts along both edges every 16
 	 * (none in front of a studio's gate).
 	 */
-	private static void road(Plan p, int x0, int z0, int x1, int z1, boolean alongX, List<int[]> gates) {
+	private static void road(Plan p, int x0, int z0, int x1, int z1, boolean alongX, List<int[]> gates, int w) {
 		int mid = alongX ? (z0 + z1) / 2 : (x0 + x1) / 2;
 		for (int x = x0; x <= x1; x++) {
 			for (int z = z0; z <= z1; z++) {
@@ -182,7 +197,7 @@ final class CompassNetwork {
 		for (int a = (alongX ? x0 : z0) + 4; a <= (alongX ? x1 : z1) - 4; a += 16) {
 			for (int edge : new int[] {(alongX ? z0 : x0) + 1, (alongX ? z1 : x1) - 1}) {
 				int px = alongX ? a : edge, pz = alongX ? edge : a;
-				if (!nearGate(gates, px, pz, 5)) {
+				if (!nearGate(gates, px, pz, 5, w)) {
 					NetworkBuilder.post(p, px, pz);
 				}
 			}
@@ -194,11 +209,12 @@ final class CompassNetwork {
 	 * with trees and benches facing the fountain, and the hub wall south of the fountain looking north
 	 * at it.
 	 */
-	private static void plaza(Plan p, int x0, int z0, int x1, int z1, int hubCount) {
+	private static void plaza(Plan p, Geo g, int x0, int z0, int x1, int z1, int hubCount) {
+		int cx = g.cx(), cz = g.cz();
 		for (int x = x0; x <= x1; x++) {
 			for (int z = z0; z <= z1; z++) {
 				boolean border = x == x0 || x == x1 || z == z0 || z == z1;
-				boolean grid = Math.floorMod(x - CX, 13) == 0 || Math.floorMod(z - CZ, 13) == 0;
+				boolean grid = Math.floorMod(x - cx, 13) == 0 || Math.floorMod(z - cz, 13) == 0;
 				p.set(x, GROUND, z, border ? STONE : grid ? EDGE : BAND);
 				for (int y = GROUND + 1; y <= GROUND + 7; y++) {
 					p.set(x, y, z, StudioHqBuilder.AIR);
@@ -209,35 +225,35 @@ final class CompassNetwork {
 		for (int dx = -5; dx <= 5; dx++) {
 			for (int dz = -5; dz <= 5; dz++) {
 				boolean rim = Math.abs(dx) == 5 || Math.abs(dz) == 5;
-				p.set(CX + dx, GROUND, CZ + dz, STONE);
-				p.set(CX + dx, GROUND + 1, CZ + dz, rim ? Blocks.STONE_BRICK_SLAB.defaultBlockState() : WATER);
+				p.set(cx + dx, GROUND, cz + dz, STONE);
+				p.set(cx + dx, GROUND + 1, cz + dz, rim ? Blocks.STONE_BRICK_SLAB.defaultBlockState() : WATER);
 			}
 		}
 		for (int dx = -2; dx <= 2; dx++) {
 			for (int dz = -2; dz <= 2; dz++) {
 				boolean rim = Math.abs(dx) == 2 || Math.abs(dz) == 2;
-				p.set(CX + dx, GROUND + 1, CZ + dz, STONE);
-				p.set(CX + dx, GROUND + 2, CZ + dz, rim ? Blocks.STONE_BRICK_SLAB.defaultBlockState() : WATER);
+				p.set(cx + dx, GROUND + 1, cz + dz, STONE);
+				p.set(cx + dx, GROUND + 2, cz + dz, rim ? Blocks.STONE_BRICK_SLAB.defaultBlockState() : WATER);
 			}
 		}
 		for (int y = GROUND + 2; y <= GROUND + 4; y++) {
-			p.set(CX, y, CZ, CHISELED);
+			p.set(cx, y, cz, CHISELED);
 		}
-		p.set(CX, GROUND + 5, CZ, StudioHqBuilder.LANTERN);
+		p.set(cx, GROUND + 5, cz, StudioHqBuilder.LANTERN);
 		// benches around the fountain
 		for (int d = -3; d <= 3; d++) {
 			if (Math.abs(d) <= 1) {
 				continue; // a gap in the middle of each side
 			}
-			p.set(CX + d, GROUND + 1, CZ - 8, St.stairs(Blocks.SPRUCE_STAIRS, Direction.NORTH, false));
-			p.set(CX + d, GROUND + 1, CZ + 8, St.stairs(Blocks.SPRUCE_STAIRS, Direction.SOUTH, false));
-			p.set(CX - 8, GROUND + 1, CZ + d, St.stairs(Blocks.SPRUCE_STAIRS, Direction.WEST, false));
-			p.set(CX + 8, GROUND + 1, CZ + d, St.stairs(Blocks.SPRUCE_STAIRS, Direction.EAST, false));
+			p.set(cx + d, GROUND + 1, cz - 8, St.stairs(Blocks.SPRUCE_STAIRS, Direction.NORTH, false));
+			p.set(cx + d, GROUND + 1, cz + 8, St.stairs(Blocks.SPRUCE_STAIRS, Direction.SOUTH, false));
+			p.set(cx - 8, GROUND + 1, cz + d, St.stairs(Blocks.SPRUCE_STAIRS, Direction.WEST, false));
+			p.set(cx + 8, GROUND + 1, cz + d, St.stairs(Blocks.SPRUCE_STAIRS, Direction.EAST, false));
 		}
 		// four garden beds on the diagonals, each with trees, a hedge and benches facing the fountain
 		for (int sx : new int[] {-1, 1}) {
 			for (int sz : new int[] {-1, 1}) {
-				int bx = CX + sx * 42, bz = CZ + sz * 42;
+				int bx = cx + sx * g.bed(), bz = cz + sz * g.bed();
 				for (int dx = -10; dx <= 10; dx++) {
 					for (int dz = -10; dz <= 10; dz++) {
 						boolean edge = Math.abs(dx) == 10 || Math.abs(dz) == 10;
@@ -270,11 +286,11 @@ final class CompassNetwork {
 			NetworkBuilder.post(p, x1 - 1, a);
 		}
 		// the hub wall, between the fountain and the south road, looking north at the fountain
-		NetworkBuilder.hubWall(p, CX, CZ + 22, Math.max(1, hubCount));
+		NetworkBuilder.hubWall(p, cx, cz + 22, Math.max(1, hubCount));
 		// help boards on the other three sides, facing the fountain: keys, console, hubs and town
-		kiosk(p, CX, CZ - 22, Direction.SOUTH, 13, 4, "help:keys");
-		kiosk(p, CX - 22, CZ, Direction.EAST, 13, 4, "help:console");
-		kiosk(p, CX + 22, CZ, Direction.WEST, 13, 4, "help:hubs");
+		kiosk(p, cx, cz - 22, Direction.SOUTH, 13, 4, "help:keys");
+		kiosk(p, cx - 22, cz, Direction.EAST, 13, 4, "help:console");
+		kiosk(p, cx + 22, cz, Direction.WEST, 13, 4, "help:hubs");
 	}
 
 	/**
@@ -310,6 +326,19 @@ final class CompassNetwork {
 		}
 		NetworkBuilder.post(p, sx - ax * 3, sz - az * 3);
 		NetworkBuilder.post(p, sx + ax * (w + 2), sz + az * (w + 2));
+	}
+
+	/** Every piece's record key, as {@link #build} names them. */
+	private static final List<String> PIECES = List.of("n", "s", "w", "e", "plaza", "on", "os", "ow", "oe",
+		"sne", "snw", "sse", "ssw", "ses", "sen", "sws", "swn");
+
+	/** Clears the whole network (roads, plaza and spokes) through its records. Server thread. */
+	static int eraseAll(ServerLevel level) {
+		int n = 0;
+		for (String k : PIECES) {
+			n += erase(level, "net-c-" + k, Placement.IDENTITY);
+		}
+		return n;
 	}
 
 	/**
