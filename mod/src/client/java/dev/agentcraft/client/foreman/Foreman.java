@@ -18,73 +18,75 @@ import org.jspecify.annotations.Nullable;
  *
  * Intents fail fast (exceptionally) while the link is not synced; an {@link Ack} with
  * {@code ok=false} carries the Foreman's error text.
+ *
+ * <p>Everything here talks to the <b>active hub</b> ({@link Hubs#active()}, the hub the player is
+ * in). World-bound code that belongs to a specific hub (a monitor, an agent) uses that
+ * {@link Hub}'s state and link instead.
  */
 public final class Foreman {
-	private static ForemanState state;
-	private static ForemanLink link;
-
 	private Foreman() {
 	}
 
-	static void install(ForemanState s, ForemanLink l) {
-		state = s;
-		link = l;
+	public static Hub hub() {
+		return Hubs.active();
 	}
 
 	public static ForemanState state() {
-		return state;
+		return Hubs.active().state();
 	}
 
 	public static ForemanLink link() {
-		return link;
+		return Hubs.active().link();
 	}
 
+	/** Hears the active hub; on a hub switch it gets the new hub's model as a snapshot. */
 	public static void addListener(ForemanListener l) {
-		state.addListener(l);
+		Hubs.addActiveListener(l);
 	}
 
 	public static boolean connected() {
-		return link != null && link.status().synced();
+		Hub h = Hubs.active();
+		return h != null && h.connected();
 	}
 
 	/** Send any client message (type + payload); see docs/protocol.md "Mod -> Foreman". */
 	public static CompletableFuture<Ack> send(String type, JsonObject payload) {
 		JsonObject m = payload.deepCopy();
 		m.addProperty("type", type);
-		return link.send(m);
+		return link().send(m);
 	}
 
 	/** New goal for the lead (console: plain text). {@code repoId} null = the Foreman's default repo. */
 	public static CompletableFuture<Ack> submitGoal(String text, @Nullable String repoId) {
-		return link.send(ForemanJson.msg("goal.submit").put("text", text).put("repoId", repoId).json());
+		return link().send(ForemanJson.msg("goal.submit").put("text", text).put("repoId", repoId).json());
 	}
 
 	/** Message an agent ({@code to} = agent id) or everyone ({@code "all"}; a leading "@name" routes it). */
 	public static CompletableFuture<Ack> message(String to, String text) {
-		return link.send(ForemanJson.msg("user.message").put("to", to).put("text", text).json());
+		return link().send(ForemanJson.msg("user.message").put("to", to).put("text", text).json());
 	}
 
 	/** Answer a decision with an option label (preferred) and/or free text. */
 	public static CompletableFuture<Ack> answer(String decisionId, @Nullable String option, @Nullable String text) {
-		return link.send(ForemanJson.msg("decision.answer").put("decisionId", decisionId).put("option", option).put("text", text).json());
+		return link().send(ForemanJson.msg("decision.answer").put("decisionId", decisionId).put("option", option).put("text", text).json());
 	}
 
 	/** {@code action}: reassign | cancel | retry | prioritize; {@code arg}: agent id / priority. */
 	public static CompletableFuture<Ack> taskAction(String taskId, String action, @Nullable String arg) {
-		return link.send(ForemanJson.msg("task.action").put("taskId", taskId).put("action", action).put("arg", arg).json());
+		return link().send(ForemanJson.msg("task.action").put("taskId", taskId).put("action", action).put("arg", arg).json());
 	}
 
 	/** {@code action}: pause | resume | stop | spawn; {@code arg}: spawn task id. */
 	public static CompletableFuture<Ack> agentAction(String agentId, String action, @Nullable String arg) {
-		return link.send(ForemanJson.msg("agent.action").put("agentId", agentId).put("action", action).put("arg", arg).json());
+		return link().send(ForemanJson.msg("agent.action").put("agentId", agentId).put("action", action).put("arg", arg).json());
 	}
 
 	public static CompletableFuture<Ack> addRepo(String path) {
-		return link.send(ForemanJson.msg("repo.add").put("path", path).json());
+		return link().send(ForemanJson.msg("repo.add").put("path", path).json());
 	}
 
 	/** Structured diff of a worktree (or an agent id: its current worktree) vs its base. */
 	public static CompletableFuture<Diff> requestDiff(String repoId, String worktree) {
-		return link.requestDiff(repoId, worktree);
+		return link().requestDiff(repoId, worktree);
 	}
 }

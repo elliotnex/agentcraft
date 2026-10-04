@@ -10,10 +10,8 @@ import dev.agentcraft.client.foreman.Protocol.ForemanStatus;
 import dev.agentcraft.client.foreman.Protocol.Goal;
 import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.TaskStatus;
-import java.net.URI;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.Minecraft;
 
 /**
  * Wires the Foreman link: creates the state model and the WebSocket client at startup, starts it
@@ -21,9 +19,11 @@ import net.minecraft.client.Minecraft;
  * ({@code dev.state.foreman}, {@code dev.foreman}).
  *
  * <pre>
- * AGENTCRAFT_PORT     Foreman port (default 7878), always 127.0.0.1
- * AGENTCRAFT_FOREMAN  0 disables the link (the HUD then says so)
+ * AGENTCRAFT_PORT     the main hub's Foreman port (default 7878), always 127.0.0.1
+ * AGENTCRAFT_FOREMAN  0 disables the links (the HUD then says so)
  * </pre>
+ *
+ * Further hubs are added at runtime ({@link Hubs#add}); the DevBridge handlers act on the active hub.
  */
 public final class ForemanFeature {
 	private ForemanFeature() {
@@ -32,16 +32,12 @@ public final class ForemanFeature {
 	public static void init() {
 		int port = ClientEnv.intValue("AGENTCRAFT_PORT", 7878);
 		boolean enabled = ClientEnv.flag("AGENTCRAFT_FOREMAN", true);
-		URI uri = URI.create("ws://127.0.0.1:" + port);
 		String modVersion = FabricLoader.getInstance().getModContainer(AgentCraft.MOD_ID)
 			.map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("0");
-		ForemanState state = new ForemanState(new LinkStatus(enabled ? LinkStatus.Phase.WAITING_RETRY : LinkStatus.Phase.DISABLED,
-			uri.toString(), 0, null, System.currentTimeMillis(), System.currentTimeMillis(), false));
-		// Executor: the client thread. Minecraft.getInstance() is resolved lazily (it does not exist yet during init).
-		ForemanLink link = new ForemanLink(uri, modVersion, state, r -> Minecraft.getInstance().execute(r), enabled);
-		Foreman.install(state, link);
-		ClientLifecycleEvents.CLIENT_STARTED.register(mc -> link.start());
-		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> link.stop());
+		Hubs.init(modVersion);
+		Hubs.add(Hub.MAIN, "Main", port, enabled);
+		ClientLifecycleEvents.CLIENT_STARTED.register(mc -> Hubs.startAll());
+		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> Hubs.stopAll());
 
 		DevBridge.addStateContributor((mc, o) -> o.add("foreman", stateJson()));
 		DevBridge.register("dev.foreman", 10_000,
@@ -49,9 +45,37 @@ public final class ForemanFeature {
 			(req, mc) -> {
 				boolean reconnect = Fields.of(req).optBool("reconnect", false);
 				if (reconnect) {
-					link.reconnectNow();
+					Foreman.link().reconnectNow();
 				}
 				return DevBridge.onClient(mc, ForemanFeature::stateJson);
+			});
+		DevBridge.register("dev.hubs", 5_000, "{} -> every hub's link: {active, hubs:[{id, name, port, link, connected, agents, tasks}]}",
+			(req, mc) -> DevBridge.onClient(mc, ForemanFeature::hubsJson));
+		DevBridge.register("dev.hub.use", 5_000, "{hub} - make that hub active (HUD, console and screens follow it)",
+			(req, mc) -> {
+				String id = Fields.of(req).nonBlank("hub");
+				return DevBridge.onClient(mc, () -> {
+					Hub hub = Hubs.get(id);
+					if (hub == null) {
+						throw new DevBridge.DevException("no hub '" + id + "'");
+					}
+					Hubs.setActive(hub);
+					return hubsJson();
+				});
+			});
+		DevBridge.register("dev.hub.add", 5_000, "{hub, port, name?} - connect another hub's Foreman (link only; no studio is built)",
+			(req, mc) -> {
+				Fields f = Fields.of(req);
+				String id = f.nonBlank("hub");
+				int hubPort = f.optInt("port", 0, 1024, 65535);
+				if (hubPort == 0) {
+					throw new DevBridge.DevException("field 'port' is required (1024-65535)");
+				}
+				String name = f.optStr("name", id);
+				return DevBridge.onClient(mc, () -> {
+					Hubs.add(id, name, hubPort, true);
+					return hubsJson();
+				});
 			});
 		if (ClientEnv.flag("AGENTCRAFT_DEV_TEST", false)) {
 			// TEST ONLY: feed a Foreman message into the state model as if the Foreman sent it (UI states
@@ -87,6 +111,7 @@ public final class ForemanFeature {
 					throw new DevBridge.DevException("field 'release' must be reconnect|replay|drop (got '" + release + "')");
 				}
 				return DevBridge.onClient(mc, () -> {
+					ForemanState state = Foreman.state();
 					JsonObject o = new JsonObject();
 					o.addProperty("wasHeld", state.isHeld());
 					if (on) {
@@ -94,7 +119,7 @@ public final class ForemanFeature {
 					} else if (state.isHeld()) {
 						o.addProperty("released", state.releaseHold(release.equals("replay")));
 						if (release.equals("reconnect")) {
-							link.reconnectNow();
+							Foreman.link().reconnectNow();
 						}
 					}
 					o.addProperty("held", state.isHeld());
@@ -109,7 +134,7 @@ public final class ForemanFeature {
 				Fields f = Fields.of(req);
 				JsonObject msg = f.obj("message").json();
 				Fields.of(msg).nonBlank("type");
-				return DevBridge.onClient(mc, () -> link.send(msg.deepCopy())).thenCompose(fut -> fut).thenApply(ack -> {
+				return DevBridge.onClient(mc, () -> Foreman.link().send(msg.deepCopy())).thenCompose(fut -> fut).thenApply(ack -> {
 					JsonObject o = new JsonObject();
 					o.add("ack", ForemanJson.GSON.toJsonTree(ack));
 					return o;
@@ -183,11 +208,32 @@ public final class ForemanFeature {
 		return o;
 	}
 
+	/** Every hub's link at a glance (dev.hubs). Client thread. */
+	public static JsonObject hubsJson() {
+		JsonObject o = new JsonObject();
+		o.addProperty("active", Foreman.hub().id());
+		com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+		for (Hub h : Hubs.all()) {
+			JsonObject j = new JsonObject();
+			j.addProperty("hub", h.id());
+			j.addProperty("name", h.name());
+			j.addProperty("port", h.port());
+			j.addProperty("link", h.state().link().phaseName());
+			j.addProperty("connected", h.connected());
+			j.addProperty("agents", h.state().agents().size());
+			j.addProperty("tasks", h.state().tasks().size());
+			arr.add(j);
+		}
+		o.add("hubs", arr);
+		return o;
+	}
+
 	/** Compact JSON view of the link + model (for dev.state / dev.foreman). Client thread. */
 	public static JsonObject stateJson() {
 		ForemanState s = Foreman.state();
 		LinkStatus l = s.link();
 		JsonObject o = new JsonObject();
+		o.addProperty("hub", Foreman.hub().id());
 		o.addProperty("link", l.phaseName());
 		o.addProperty("connected", l.synced());
 		o.addProperty("url", l.url());
