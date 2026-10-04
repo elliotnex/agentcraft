@@ -127,6 +127,10 @@ public class NewHubScreen extends Screen {
 			loadGhRepos();
 		} else {
 			folder = addRenderableWidget(field(x, y + 116, fw, folder, 400, "Project folder"));
+			// next to the other projects, named after the id (unless you typed a path yourself)
+			if (!folderTouched && id != null) {
+				folder.setValue(suggestFolder(id.getValue()));
+			}
 			folder.setResponder(v -> folderTouched = true);
 		}
 		setFocused(id);
