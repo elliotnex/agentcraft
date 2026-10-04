@@ -28,7 +28,7 @@ public final class FreelanceFeature {
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> attach());
 		DevBridge.registerScreen("freelance", mc -> new FreelanceScreen());
 		DevBridge.register("dev.freelance", 15_000,
-			"{request?, search?, press?: preset|browse|pick|tools|refresh|back|repo|mode|send, arg?:0} - drive the open freelancer terminal (opens it first)",
+			"{request?, search?, press?: preset|browse|pick|tools|refresh|back|repo|mode|send|newchat, arg?:0 (mode: 0 task, 1 ask, 2 chat)} - drive the open freelancer terminal (opens it first)",
 			(req, mc) -> {
 				Fields f = Fields.of(req);
 				String request = f.optStr("request", null);
@@ -55,6 +55,7 @@ public final class FreelanceFeature {
 					o.addProperty("connected", h != null && h.connected());
 					o.addProperty("model", FreelanceScreen.currentModel());
 					o.addProperty("repos", FreelanceScreen.repos().size());
+					o.addProperty("mode", s.mode());
 					o.addProperty("browsing", s.browsing());
 					o.addProperty("field", s.modelValue());
 					o.addProperty("catalog", FreelanceScreen.catalog().size());

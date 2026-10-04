@@ -1,6 +1,7 @@
 // The freelancer's tools: a small, sturdy set any tool-calling model can drive. Files stay inside
-// the task's worktree; commands go through the same permission policy as the Claude team (allow /
-// ask the user / deny) and run with git's network transports disabled (gitsafety).
+// the task's worktree (a chat reads any hub's repo, read-only: see town.ts); commands go through
+// the same permission policy as the Claude team (allow / ask the user / deny) and run with git's
+// network transports disabled (gitsafety).
 import fs from 'node:fs';
 import path from 'node:path';
 import { withGitSafety } from '../../gitsafety.js';
@@ -10,7 +11,7 @@ import { isInsideOrEqual } from '../../util/fsx.js';
 import { agentGitIdentity } from '../../util/git.js';
 import type { ToolSpec } from './client.js';
 
-export type Mode = 'task' | 'ask';
+export type Mode = 'task' | 'ask' | 'chat';
 
 const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[]): ToolSpec => ({
   type: 'function',
@@ -50,7 +51,43 @@ const WRITE_TOOLS: ToolSpec[] = [
 
 const ANSWER_TOOL = fn('answer', 'Give the user your answer (markdown allowed). Ends the session.', { text: { type: 'string' } }, ['text']);
 
+const HUB = { type: 'string', description: 'hub name (see list_hubs)' };
+const WHERE = {
+  hub: HUB,
+  repo: { type: 'string', description: 'repo id or name in that hub (optional when the hub has one repo)' },
+  worktree: { type: 'string', description: "an agent's worktree id, to see work in progress (default: the main checkout)" },
+};
+
+/** Chat: a read-only look at every hub on this machine, and the code of any of their repos. */
+const CHAT_TOOLS: ToolSpec[] = [
+  fn('list_hubs', 'Every hub (project studio) on this machine: backend, whether it runs, agents, tasks, open decisions, repos, spend, last activity.', {}, []),
+  fn('hub_overview', 'One hub in detail: recent goals, each agent and what it is doing, active tasks, open decisions, repos and worktrees.', { hub: HUB }, ['hub']),
+  fn('hub_tasks', "A hub's tasks, most recently updated first.", {
+    hub: HUB,
+    status: { type: 'string', description: 'only this status: todo, doing, review, blocked, done, cancelled' },
+    limit: { type: 'integer', description: 'default 40' },
+  }, ['hub']),
+  fn('task_detail', 'One task of a hub: description, summary, cost, and the decisions about it.', { hub: HUB, task: { type: 'string', description: 'task id, e.g. "t3"' } }, ['hub', 'task']),
+  fn('hub_feed', "A hub's activity feed (goals, task changes, messages, merges), newest last.", { hub: HUB, limit: { type: 'integer', description: 'default 40' } }, ['hub']),
+  fn('agent_log', "The end of one agent's log in a hub: what it thought, read, ran and got back.", {
+    hub: HUB,
+    agent: { type: 'string', description: 'agent id, e.g. "kit"' },
+    limit: { type: 'integer', description: 'entries, default 40' },
+  }, ['hub', 'agent']),
+  fn('usage', 'Spend: per hub, by model, by agent, and the costliest sessions / tasks.', { hub: { type: 'string', description: 'one hub (default: all)' } }, []),
+  fn('list_files', "List files and folders of a hub's repo.", { ...WHERE, path: { type: 'string', description: 'folder, relative to the repo root' }, depth: { type: 'integer', description: '1-4, default 2' } }, ['hub']),
+  fn('read_file', "Read a text file of a hub's repo, optionally a range of lines.", {
+    ...WHERE,
+    path: { type: 'string' },
+    offset: { type: 'integer', description: 'first line, 1-based' },
+    limit: { type: 'integer', description: 'number of lines (default 400)' },
+  }, ['hub', 'path']),
+  fn('search', "Search a hub's repo for a regular expression (git grep).", { ...WHERE, pattern: { type: 'string' }, path: { type: 'string', description: 'limit to this folder' } }, ['hub', 'pattern']),
+  fn('answer', 'Reply to the user (markdown allowed). They can answer back; the conversation continues.', { text: { type: 'string' } }, ['text']),
+];
+
 export function toolsFor(mode: Mode): ToolSpec[] {
+  if (mode === 'chat') return CHAT_TOOLS;
   return mode === 'task' ? [...READ_TOOLS, ...WRITE_TOOLS] : [...READ_TOOLS, ANSWER_TOOL];
 }
 

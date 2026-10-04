@@ -34,9 +34,10 @@ import org.jspecify.annotations.Nullable;
 /**
  * The freelancer's terminal (the console terminal in the plaza pavilion): pick a model (type any id,
  * click a preset, or browse the endpoint's live catalog with prices), a repository from any hub's
- * project, task or question, type the request and send it to Scout. Below: Scout's recent jobs with
- * status, model and cost. Scout's own Foreman runs the open backend (OpenRouter by default) and
- * serves the model list ({@code models.list}).
+ * project, a mode (task, question, or a chat that needs no repo and sees every hub read-only), type
+ * the request and send it to Scout. A chat carries on while Scout's last one is recent ("New chat"
+ * starts over). Below: Scout's recent jobs with status, model and cost. Scout's own Foreman runs the
+ * open backend (OpenRouter by default) and serves the model list ({@code models.list}).
  */
 public class FreelanceScreen extends Screen {
 	private static final int W = 360;
@@ -44,8 +45,12 @@ public class FreelanceScreen extends Screen {
 	/** One click away; any other id can be typed, or picked from the live list. */
 	static final List<String> PRESETS = List.of("openai/gpt-5-mini", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-flash", "deepseek/deepseek-chat-v3.1",
 		"qwen/qwen3-coder");
+	/** Modes, as the Foreman names them (goal.submit {@code mode}). */
+	static final List<String> MODES = List.of("task", "ask", "chat");
+	/** a chat this recent carries on (the Foreman's own window is two hours; stay inside it) */
+	private static final long CHAT_IDLE_MS = 110 * 60_000L;
 	private static @Nullable String lastRepoPath;
-	private static boolean lastAsk;
+	private static @Nullable String lastMode;
 	/** The live catalog, shared by every open of the screen (refetched after ten minutes). */
 	private static List<ModelInfo> catalog = List.of();
 	private static long catalogAt;
@@ -70,7 +75,8 @@ public class FreelanceScreen extends Screen {
 	private boolean browsing;
 	private int listScroll;
 	private int listMax;
-	private boolean ask = lastAsk;
+	private String mode = lastMode != null ? lastMode : repos().isEmpty() ? "chat" : "task";
+	/** index into {@link #choices()} */
 	private int repoIndex;
 	private String note = "";
 	private boolean noteBad;
@@ -112,13 +118,46 @@ public class FreelanceScreen extends Screen {
 		request = addRenderableWidget(field(x + 4, y + 122, inner - 8, req, 2000, "Request"));
 		setFocused(request);
 		request.setFocused(true);
-		List<RepoChoice> repos = repos();
+		pickRepo();
+	}
+
+	/** Point at the last repo used (or, in a chat, no repo when none was picked). */
+	private void pickRepo() {
+		List<@Nullable RepoChoice> choices = choices();
 		repoIndex = 0;
-		for (int i = 0; i < repos.size(); i++) {
-			if (repos.get(i).path().equals(lastRepoPath)) {
+		for (int i = 0; i < choices.size(); i++) {
+			RepoChoice c = choices.get(i);
+			if (c == null ? lastRepoPath == null : c.path().equals(lastRepoPath)) {
 				repoIndex = i;
 			}
 		}
+	}
+
+	/** The repos this mode can use: a chat may also have none (null, first). */
+	private List<@Nullable RepoChoice> choices() {
+		List<@Nullable RepoChoice> out = new ArrayList<>();
+		if (mode.equals("chat")) {
+			out.add(null);
+		}
+		out.addAll(repos());
+		return out;
+	}
+
+	/** Scout's chat that a message carries on: the latest one, if it is recent and not cancelled. */
+	static @Nullable Task liveChat(@Nullable ForemanState s) {
+		if (s == null) {
+			return null;
+		}
+		Task last = null;
+		for (Task t : s.tasks().values()) {
+			if (t.title().startsWith("Chat: ") && (last == null || t.createdAt() > last.createdAt())) {
+				last = t;
+			}
+		}
+		if (last == null || last.status().wire().equals("cancelled") || System.currentTimeMillis() - last.updatedAt() > CHAT_IDLE_MS) {
+			return null;
+		}
+		return last;
 	}
 
 	private EditBox field(int x, int y, int w, String value, int max, String label) {
@@ -291,33 +330,57 @@ public class FreelanceScreen extends Screen {
 		}
 		chip(g, browse, x + inner - browseW, cy, browseW, false, "browse", 0, mouseX, mouseY);
 		y += 50;
-		// ---- repository: cycle through every hub's projects
-		List<RepoChoice> repos = repos();
+		// ---- repository: cycle through every hub's projects (a chat may have none)
+		List<@Nullable RepoChoice> choices = choices();
 		Panels.text(g, font, "Repo", x, y + 6, muted);
-		String repoLabel = repos.isEmpty() ? "no project connected in any hub" : repos.get(Math.floorMod(repoIndex, repos.size())).name() + "  ("
-			+ repos.get(Math.floorMod(repoIndex, repos.size())).hubName() + ")";
+		RepoChoice picked = choices.isEmpty() ? null : choices.get(Math.floorMod(repoIndex, choices.size()));
+		String repoLabel = picked != null ? picked.name() + "  (" + picked.hubName() + ")" : choices.isEmpty() ? "no project connected in any hub"
+			: "none: Scout looks across every hub";
 		int rb = button(g, "repo", 0, "<", x + 50, y, false, mouseX, mouseY);
-		Panels.text(g, font, TextUtil.ellipsize(font, repoLabel, inner - 50 - 2 * rb - 16), x + 50 + rb + 6, y + 6, repos.isEmpty() ? muted : ink);
+		Panels.text(g, font, TextUtil.ellipsize(font, repoLabel, inner - 50 - 2 * rb - 16), x + 50 + rb + 6, y + 6, picked == null ? muted : ink);
 		button(g, "repo", 1, ">", x + inner - rb, y, false, mouseX, mouseY);
 		y += 24;
 		// ---- mode
 		Panels.text(g, font, "Mode", x, y + 6, muted);
 		int mx = x + 50;
-		mx += button(g, "mode", 0, "Task: change code", mx, y, !ask, mouseX, mouseY) + 6;
-		button(g, "mode", 1, "Ask: a question", mx, y, ask, mouseX, mouseY);
+		mx += button(g, "mode", 0, "Task", mx, y, mode.equals("task"), mouseX, mouseY) + 4;
+		mx += button(g, "mode", 1, "Ask", mx, y, mode.equals("ask"), mouseX, mouseY) + 4;
+		mx += button(g, "mode", 2, "Chat", mx, y, mode.equals("chat"), mouseX, mouseY) + 8;
+		String what = switch (mode) {
+			case "ask" -> "a question about one repo";
+			case "chat" -> "anything; sees every hub, read-only";
+			default -> "changes code in its own branch";
+		};
+		Panels.text(g, font, TextUtil.ellipsize(font, what, x + inner - mx), mx, y + 6, muted);
 		y += 26;
 		// ---- the request
+		Task chat = mode.equals("chat") && live ? liveChat(s) : null;
 		g.fill(x, y - 3, x + inner, y + 13, UiStyle.withAlpha(UiStyle.WALNUT, 24));
 		if (request != null && request.getValue().isEmpty() && !request.isFocused()) {
-			Panels.text(g, font, ask ? "What do you want to know about the code?" : "What should Scout change?", x + 4, y, muted);
+			String placeholder = switch (mode) {
+				case "ask" -> "What do you want to know about the code?";
+				case "chat" -> chat != null ? "Reply to Scout..." : "Ask anything: how are the hubs doing? what have we spent?";
+				default -> "What should Scout change?";
+			};
+			Panels.text(g, font, placeholder, x + 4, y, muted);
 		}
 		super.extractRenderState(g, mouseX, mouseY, partial);
 		y += 18;
-		String send = sending ? "Sending..." : ask ? "Ask Scout" : "Send to Scout";
+		String send = sending ? "Sending..." : switch (mode) {
+			case "ask" -> "Ask Scout";
+			case "chat" -> chat != null ? "Reply" : "Chat with Scout";
+			default -> "Send to Scout";
+		};
 		int sw = UiBits.buttonWidth(font, send, 0);
 		button(g, "send", 0, send, x + inner - sw, y, true, mouseX, mouseY);
-		String hint = !note.isEmpty() ? note : setupHint(hub, st);
-		Panels.text(g, font, TextUtil.ellipsize(font, hint, inner - sw - 8), x, y + 6, noteBad ? UiStyle.CLAY_DARK : muted);
+		int left = inner - sw - 8;
+		if (chat != null) {
+			int nw = button(g, "newchat", 0, "New chat", x + inner - sw - 4 - UiBits.buttonWidth(font, "New chat", 0), y, false, mouseX, mouseY);
+			left -= nw + 4;
+		}
+		String hint = !note.isEmpty() ? note : chat != null ? "Carrying on " + chat.id() + (chat.model() != null ? " on " + shortModel(chat.model()) : "")
+			: setupHint(hub, st);
+		Panels.text(g, font, TextUtil.ellipsize(font, hint, left), x, y + 6, noteBad ? UiStyle.CLAY_DARK : muted);
 		y += 26;
 		// ---- recent jobs: status, model, cost
 		Panels.divider(g, x, y - 4, inner);
@@ -548,17 +611,23 @@ public class FreelanceScreen extends Screen {
 				rebuildWidgets();
 			}
 			case "repo" -> {
-				List<RepoChoice> repos = repos();
-				if (!repos.isEmpty()) {
-					repoIndex = Math.floorMod(repoIndex + (arg == 0 ? -1 : 1), repos.size());
-					lastRepoPath = repos.get(repoIndex).path();
+				List<@Nullable RepoChoice> choices = choices();
+				if (!choices.isEmpty()) {
+					repoIndex = Math.floorMod(repoIndex + (arg == 0 ? -1 : 1), choices.size());
+					RepoChoice c = choices.get(repoIndex);
+					lastRepoPath = c == null ? null : c.path();
 				}
 			}
 			case "mode" -> {
-				ask = arg == 1;
-				lastAsk = ask;
+				if (arg >= 0 && arg < MODES.size()) {
+					mode = MODES.get(arg);
+					lastMode = mode;
+					note = "";
+					pickRepo();
+				}
 			}
-			case "send" -> send();
+			case "newchat" -> send(true);
+			case "send" -> send(false);
 			default -> {
 			}
 		}
@@ -585,7 +654,12 @@ public class FreelanceScreen extends Screen {
 		return model == null ? null : model.getValue();
 	}
 
-	private void send() {
+	String mode() {
+		return mode;
+	}
+
+	/** Send the request: a new goal, or (a chat, unless {@code fresh}) the next message of Scout's live chat. */
+	private void send(boolean fresh) {
 		Hub hub = hub();
 		String text = request == null ? "" : request.getValue().trim();
 		if (sending || text.isEmpty()) {
@@ -595,46 +669,65 @@ public class FreelanceScreen extends Screen {
 			fail("Scout's Foreman isn't connected yet");
 			return;
 		}
-		List<RepoChoice> repos = repos();
-		if (repos.isEmpty()) {
-			fail("Connect a project in a hub first (console: /repo add <path>)");
+		boolean chat = mode.equals("chat");
+		if (chat && !fresh && liveChat(hub.state()) != null) {
+			sending = true;
+			note = "";
+			Foreman.messageTo(hub, FreelancePavilion.AGENT, text).whenComplete((ack, err) -> done(err, ack, "Sent to Scout: the reply comes in chat"));
 			return;
 		}
-		RepoChoice repo = repos.get(Math.floorMod(repoIndex, repos.size()));
-		lastRepoPath = repo.path();
+		List<@Nullable RepoChoice> choices = choices();
+		if (choices.isEmpty()) {
+			fail("Connect a project in a hub first (console: /repo add <path>), or Chat");
+			return;
+		}
+		RepoChoice repo = choices.get(Math.floorMod(repoIndex, choices.size()));
+		lastRepoPath = repo == null ? null : repo.path();
 		String m = model == null || model.getValue().isBlank() ? null : model.getValue().trim();
 		sending = true;
 		note = "";
-		// the freelancer's Foreman knows a repository once it has been added there
-		String known = null;
-		for (Repo r : hub.state().repos().values()) {
-			if (norm(r.path()).equals(norm(repo.path()))) {
-				known = r.id();
+		CompletableFuture<@Nullable String> repoId;
+		if (repo == null) {
+			repoId = CompletableFuture.completedFuture(null);
+		} else {
+			// the freelancer's Foreman knows a repository once it has been added there
+			String known = null;
+			for (Repo r : hub.state().repos().values()) {
+				if (norm(r.path()).equals(norm(repo.path()))) {
+					known = r.id();
+				}
 			}
-		}
-		CompletableFuture<String> repoId = known != null ? CompletableFuture.completedFuture(known)
-			: Foreman.addRepoTo(hub, repo.path()).thenApply(ack -> {
+			repoId = known != null ? CompletableFuture.completedFuture(known) : Foreman.addRepoTo(hub, repo.path()).thenApply(ack -> {
 				if (!ack.ok() || ack.result() == null || !ack.result().has("repoId")) {
 					throw new IllegalStateException(ack.error() != null ? ack.error() : "could not add " + repo.name());
 				}
 				return ack.result().get("repoId").getAsString();
 			});
-		repoId.thenCompose(id -> Foreman.submitGoalTo(hub, text, id, m, ask ? "ask" : "task")).whenComplete((Ack ack, Throwable err) -> {
-			sending = false;
-			if (err != null) {
-				fail(rootMessage(err));
-			} else if (!ack.ok()) {
-				fail(ack.error() != null ? ack.error() : "Scout couldn't take it");
-			} else {
-				ModelInfo mi = info(m != null ? m : currentModel());
-				note = (ask ? "Asked Scout" : "Sent to Scout") + " on " + shortModel(m != null ? m : currentModel()) + (mi != null && !price(mi).isEmpty() ? " ("
-					+ price(mi) + ")" : "") + (ask ? ": the answer comes in chat" : ": you'll get a merge to review");
-				noteBad = false;
-				if (request != null) {
-					request.setValue("");
-				}
+		}
+		String on = shortModel(m != null ? m : currentModel());
+		ModelInfo mi = info(m != null ? m : currentModel());
+		String priced = on + (mi != null && !price(mi).isEmpty() ? " (" + price(mi) + ")" : "");
+		String sent = switch (mode) {
+			case "ask" -> "Asked Scout on " + priced + ": the answer comes in chat";
+			case "chat" -> "Chatting with Scout on " + priced + ": replies come in chat";
+			default -> "Sent to Scout on " + priced + ": you'll get a merge to review";
+		};
+		repoId.thenCompose(id -> Foreman.submitGoalTo(hub, text, id, m, mode)).whenComplete((ack, err) -> done(err, ack, sent));
+	}
+
+	private void done(@Nullable Throwable err, @Nullable Ack ack, String sent) {
+		sending = false;
+		if (err != null) {
+			fail(rootMessage(err));
+		} else if (ack == null || !ack.ok()) {
+			fail(ack != null && ack.error() != null ? ack.error() : "Scout couldn't take it");
+		} else {
+			note = sent;
+			noteBad = false;
+			if (request != null) {
+				request.setValue("");
 			}
-		});
+		}
 	}
 
 	private void fail(String why) {

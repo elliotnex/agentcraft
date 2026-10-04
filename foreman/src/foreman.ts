@@ -612,11 +612,14 @@ export class Foreman {
   }
 
   async submitGoal(text: string, repoId?: string, extra: { model?: string; mode?: GoalMode } = {}): Promise<Goal> {
-    const repo = repoId ? this.repos.get(repoId) : this.repos.defaultRepo();
+    // a chat needs no repo (it may still name one to start from)
+    const chat = extra.mode === 'chat';
+    const repo = repoId ? this.repos.get(repoId) : chat ? undefined : this.repos.defaultRepo();
     if (repoId && !repo) throw new ClientError(`no repo "${repoId}"`);
-    if (!repo) throw new ClientError('no repo connected yet — add one with /repo add <path>');
+    if (!repo && !chat) throw new ClientError('no repo connected yet — add one with /repo add <path>');
     if (!this.backend) throw new ClientError('no backend running');
-    const goal = this.createGoal(text, repo.id, extra);
+    if (chat && this.backend.name !== 'open') throw new ClientError('only the freelancer chats; send this to Scout in the plaza');
+    const goal = this.createGoal(text, repo?.id, extra);
     await this.backend.submitGoal(goal);
     return goal;
   }

@@ -167,7 +167,7 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `status` | `planning` \| `active` \| `done` \| `failed` \| `cancelled` | yes | planning (lead is planning) -> active -> done (every non-cancelled task merged/done); cancelled: every task was cancelled or rejected (back to active if the lead adds a task); failed: planning failed |
 | `repoId` | string | no |  |
 | `model` | string | no | open: the model this goal runs on (e.g. "openai/gpt-5") |
-| `mode` | `task` \| `ask` | no | open: task (changes in a worktree, ends in a merge decision) or ask (a question, read-only) |
+| `mode` | `task` \| `ask` \| `chat` | no | open: task (changes in a worktree, ends in a merge decision), ask (a question about one repo, read-only) or chat (a conversation, no repo needed, with a read-only view of every hub on this machine) |
 | `createdAt` | integer | yes | epoch milliseconds |
 | `updatedAt` | integer | yes | epoch milliseconds |
 
@@ -920,7 +920,7 @@ New goal for the lead (console: plain text).
 | `text` | string | yes |  |
 | `repoId` | string | no | defaults to the only/most recently added repo |
 | `model` | string | no | open backend: run on this model (and make it the default) |
-| `mode` | `task` \| `ask` | no | open backend: task (default) or ask (a question; no file changes) |
+| `mode` | `task` \| `ask` \| `chat` | no | open backend: task (default), ask (a question; no file changes) or chat (a conversation that needs no repo; reads every hub, read-only; later messages to Scout continue it) |
 
 ```json
 {

@@ -1,7 +1,8 @@
 // The open backend: Scout, a freelancer on any OpenAI-compatible model (OpenRouter by default, or a
 // local Ollama / LM Studio). One job at a time. A task runs in its own worktree and ends in the
-// usual merge decision; a question ("ask") reads the main checkout and answers in the feed. Shell
-// commands go through the same permission policy as the Claude team.
+// usual merge decision; a question ("ask") reads the main checkout and answers in the feed; a chat
+// needs no repo, looks at every hub on this machine read-only (town.ts) and carries on when the
+// user talks to Scout again. Shell commands go through the same permission policy as the Claude team.
 import type { Backend, Foreman } from '../../foreman.js';
 import type { OpenConfig } from '../../config.js';
 import { OPENROUTER_URL } from '../../config.js';
@@ -13,6 +14,7 @@ import { firstLine, truncate } from '../../util/text.js';
 import { userName } from '../../user.js';
 import { openAiClient, type ChatMessage, type CompleteFn } from './client.js';
 import { editFile, listFiles, readFile, runCommand, search, toolsFor, ToolError, writeFile } from './tools.js';
+import { Town } from './town.js';
 
 const ID = SCOUT.id;
 
@@ -22,7 +24,14 @@ interface OpenState {
   /** task id -> model it runs on (a retry / requested change keeps it) */
   taskModels: Record<string, string>;
   ciFixes: Record<string, number>;
+  /** the chat a message to Scout continues */
+  chatTask?: string;
 }
+
+/** a message to Scout continues the last chat if it was this recent, else starts a new one */
+const CHAT_IDLE_MS = 2 * 60 * 60_000;
+const CHAT_PREFIX = 'Chat: ';
+const ASK_PREFIX = 'Q: ';
 
 interface Job {
   taskId: string;
@@ -42,6 +51,7 @@ export class OpenBackend implements Backend {
   private catalog?: { at: number; models: ModelInfo[] };
   private catalogLoading?: Promise<ModelInfo[]>;
   private readonly fetchCatalog: () => Promise<ModelInfo[]>;
+  private readonly town: Town;
 
   constructor(
     private readonly fm: Foreman,
@@ -51,6 +61,7 @@ export class OpenBackend implements Backend {
     fetchCatalog?: () => Promise<ModelInfo[]>,
   ) {
     this.fetchCatalog = fetchCatalog ?? (() => fetchModels(cfg.baseUrl, this.apiKey()));
+    this.town = new Town(fm.config.home, fm.config.profile, () => fm.store.data, fm.ctx.now);
     this.complete = complete ?? openAiClient({ baseUrl: cfg.baseUrl, ...(this.apiKey() ? { apiKey: this.apiKey()! } : {}), appName: 'AgentCraft' });
   }
 
@@ -145,7 +156,7 @@ export class OpenBackend implements Backend {
       text = text.replace(/^\s*\?\s*/, '');
     }
     const t = this.fm.tasks.create({
-      title: `${mode === 'ask' ? 'Q: ' : ''}${firstLine(text, 72)}`,
+      title: `${mode === 'ask' ? ASK_PREFIX : mode === 'chat' ? CHAT_PREFIX : ''}${firstLine(text, 72)}`,
       description: text,
       assignee: ID,
       createdBy: 'user',
@@ -153,6 +164,7 @@ export class OpenBackend implements Backend {
       goalId: goal.id,
     });
     this.st.taskModels[t.id] = this.model();
+    if (mode === 'chat') this.st.chatTask = t.id;
     this.fm.tasks.update(t.id, { model: this.model() });
     this.fm.store.markDirty();
     this.fm.setGoal(goal.id, { status: 'active' });
@@ -165,8 +177,13 @@ export class OpenBackend implements Backend {
       this.setModel(m[1]!);
       return;
     }
-    // anything else said to Scout is a question about the code
-    void this.fm.submitGoal(text, undefined, { mode: 'ask' }).catch((e: Error) => this.fm.bus.send(ID, 'user', `I can't take that: ${e.message}`));
+    // anything else said to Scout carries on the chat, or starts one
+    const chat = this.st.chatTask ? this.fm.tasks.get(this.st.chatTask) : undefined;
+    if (chat && chat.status !== 'cancelled' && this.fm.ctx.now() - chat.updatedAt < CHAT_IDLE_MS) {
+      this.enqueue({ taskId: chat.id, mode: 'chat', followup: `${userName()}: ${text}` });
+      return;
+    }
+    void this.fm.submitGoal(text, undefined, { mode: 'chat' }).catch((e: Error) => this.fm.bus.send(ID, 'user', `I can't take that: ${e.message}`));
   }
 
   onDecisionSettled(d: Decision): void {
@@ -188,9 +205,8 @@ export class OpenBackend implements Backend {
       void this.windDown(task, 'cancelled');
     } else if (action === 'retry') {
       if (this.running?.taskId === task.id || this.jobs.some((j) => j.taskId === task.id)) return;
-      const ask = task.title.startsWith('Q: ');
       this.fm.tasks.setStatus(task.id, 'todo', { force: true });
-      this.enqueue({ taskId: task.id, mode: ask ? 'ask' : 'task', ...(this.chats.has(task.id) ? { followup: 'You were interrupted. Carry on from where you were, then call finish.' } : {}) });
+      this.enqueue({ taskId: task.id, mode: modeOf(task), ...(this.chats.has(task.id) ? { followup: 'You were interrupted. Carry on from where you were, then call finish.' } : {}) });
     }
   }
 
@@ -251,10 +267,15 @@ export class OpenBackend implements Backend {
 
   private async run(job: Job, signal: AbortSignal): Promise<void> {
     const t = this.fm.tasks.require(job.taskId);
-    const repo = this.fm.repos.require(t.repoId ?? this.fm.repos.defaultRepo()?.id ?? '');
     const model = this.st.taskModels[t.id] ?? this.model();
-    let cwd = repo.path;
-    if (job.mode === 'task') {
+    // a chat may start from a repo but needs none: its tools name the hub and repo they look at
+    const repo = job.mode === 'chat'
+      ? (t.repoId ? this.fm.repos.get(t.repoId) : undefined)
+      : this.fm.repos.require(t.repoId ?? this.fm.repos.defaultRepo()?.id ?? '');
+    let cwd = repo?.path ?? '';
+    if (!repo) {
+      this.fm.setAgent(ID, { taskId: t.id, repoId: null, worktree: null });
+    } else if (job.mode === 'task') {
       let wt = t.worktree ? this.fm.repos.findWorktree(repo.id, t.worktree) : undefined;
       if (!wt || wt.status !== 'active') {
         wt = await this.fm.repos.createWorktree(repo.id, ID, t);
@@ -271,11 +292,19 @@ export class OpenBackend implements Backend {
 
     let chat = this.chats.get(t.id);
     if (!chat || !job.followup) {
+      const request = t.description ?? t.title;
+      const first = job.mode === 'ask'
+        ? `Question from ${userName()}:\n${request}`
+        : job.mode === 'chat'
+          ? `${userName()}: ${request}${job.followup && t.summary ? `\n\n(Earlier you replied: ${t.summary})` : ''}`
+          : `Task from ${userName()}:\n${request}${job.followup && t.summary ? `\n\nEarlier you reported: ${t.summary}` : ''}`;
       chat = [
-        { role: 'system', content: systemPrompt(job.mode, repo.branch) },
-        { role: 'user', content: job.mode === 'ask' ? `Question from ${userName()}:\n${t.description ?? t.title}` : `Task from ${userName()}:\n${t.description ?? t.title}${job.followup && t.summary ? `\n\nEarlier you reported: ${t.summary}` : ''}` },
+        { role: 'system', content: job.mode === 'chat' ? chatPrompt(this.fm.config.profile, repo?.id) : systemPrompt(job.mode, repo!.branch) },
+        { role: 'user', content: first },
       ];
       this.chats.set(t.id, chat);
+    } else if (job.mode === 'chat') {
+      compact(chat);
     }
     if (job.followup) chat.push({ role: 'user', content: job.followup });
 
@@ -297,9 +326,9 @@ export class OpenBackend implements Backend {
       const calls = msg.tool_calls ?? [];
       if (!calls.length) {
         // a plain reply: for a question that is the answer; a task gets one reminder to use the tools
-        if (job.mode === 'ask' && msg.content?.trim()) return this.answered(t, msg.content.trim());
+        if (job.mode !== 'task' && msg.content?.trim()) return this.answered(t, msg.content.trim(), job.mode === 'chat');
         if (nudges++ < 2) {
-          chat.push({ role: 'user', content: job.mode === 'ask' ? 'Call the answer tool with your answer.' : 'Use the tools to do the work. When the change is done and checked, call finish with a summary.' });
+          chat.push({ role: 'user', content: job.mode !== 'task' ? 'Call the answer tool with your answer.' : 'Use the tools to do the work. When the change is done and checked, call finish with a summary.' });
           continue;
         }
         if (job.mode === 'task' && msg.content?.trim()) return this.finished(t, msg.content.trim(), signal);
@@ -319,9 +348,9 @@ export class OpenBackend implements Backend {
           chat.push({ role: 'tool', tool_call_id: call.id, content: 'ok' });
           return this.finished(t, String(args.summary ?? 'Done.'), signal);
         }
-        if (name === 'answer' && job.mode === 'ask') {
+        if (name === 'answer' && job.mode !== 'task') {
           chat.push({ role: 'tool', tool_call_id: call.id, content: 'ok' });
-          return this.answered(t, String(args.text ?? ''));
+          return this.answered(t, String(args.text ?? ''), job.mode === 'chat');
         }
         const out = await this.tool(name, args, cwd, job.mode, signal);
         chat.push({ role: 'tool', tool_call_id: call.id, content: out });
@@ -334,6 +363,7 @@ export class OpenBackend implements Backend {
     const show = describe(name, args);
     try {
       if (!toolsFor(mode).some((s) => s.function.name === name)) throw new ToolError(`no tool named ${name}`);
+      if (mode === 'chat') return await this.townTool(name, args, show);
       switch (name) {
         case 'list_files':
           this.fm.setAgent(ID, { state: 'reading', activity: show });
@@ -373,6 +403,36 @@ export class OpenBackend implements Backend {
       const msg = e instanceof ToolError ? e.message : `failed: ${(e as Error).message}`;
       this.fm.agentLog(ID, 'error', `${show}: ${msg}`);
       return `Error: ${msg}`;
+    }
+  }
+
+  /** A chat's tools: read-only, over every hub on this machine. */
+  private async townTool(name: string, a: Record<string, unknown>, show: string): Promise<string> {
+    this.fm.setAgent(ID, { state: 'reading', station: 'terminal', activity: truncate(show, 48) });
+    this.fm.agentLog(ID, 'tool', show);
+    switch (name) {
+      case 'list_hubs':
+        return this.town.listHubs();
+      case 'hub_overview':
+        return this.town.overview(a.hub);
+      case 'hub_tasks':
+        return this.town.tasks(a.hub, a.status, a.limit);
+      case 'task_detail':
+        return this.town.task(a.hub, a.task);
+      case 'hub_feed':
+        return this.town.feed(a.hub, a.limit);
+      case 'agent_log':
+        return this.town.log(a.hub, a.agent, a.limit);
+      case 'usage':
+        return this.town.usage(a.hub);
+      case 'list_files':
+        return listFiles(this.town.repoRoot(a.hub, a.repo, a.worktree), a.path, a.depth);
+      case 'read_file':
+        return readFile(this.town.repoRoot(a.hub, a.repo, a.worktree), a.path, a.offset, a.limit);
+      case 'search':
+        return await search(this.town.repoRoot(a.hub, a.repo, a.worktree), a.pattern, a.path);
+      default:
+        throw new ToolError(`no tool named ${name}`);
     }
   }
 
@@ -420,11 +480,12 @@ export class OpenBackend implements Backend {
     return `Error: ${userName()} denied this${res.answer?.text ? `: ${res.answer.text}` : ''}. Find another way.`;
   }
 
-  private answered(t: Task, text: string): void {
+  /** A question's answer or a chat's reply (a chat keeps its conversation for the next message). */
+  private answered(t: Task, text: string, keep = false): void {
     const answer = text.trim() || '(no answer)';
     this.fm.tasks.setStatus(t.id, 'done', { force: true, summary: truncate(answer, 1000) });
     this.fm.bus.send(ID, 'user', answer);
-    this.chats.delete(t.id);
+    if (!keep) this.chats.delete(t.id);
     this.idle(`answered ${t.id}`);
   }
 
@@ -470,21 +531,46 @@ export class OpenBackend implements Backend {
       if (wt?.status === 'active') await this.fm.repos.abandon(t.repoId, wt.id, `agentcraft: ${t.id} (${how})`).catch((e: Error) => this.fm.log.warn(`abandon: ${e.message}`));
     }
     this.chats.delete(t.id);
+    if (this.st.chatTask === t.id) delete this.st.chatTask;
     if (!this.running) this.idle(`${t.id} ${how}`);
   }
 }
 
 const shortModel = (m: string) => m.replace(/^[^/]+\//, '');
 
+function modeOf(t: Task): GoalMode {
+  return t.title.startsWith(ASK_PREFIX) ? 'ask' : t.title.startsWith(CHAT_PREFIX) ? 'chat' : 'task';
+}
+
+/** Before a chat's next message: earlier tool output is shortened, so a long chat stays affordable. */
+function compact(chat: ChatMessage[]): void {
+  for (const m of chat) if (m.role === 'tool' && m.content && m.content.length > 600) m.content = `${m.content.slice(0, 600)}\n... (trimmed; call the tool again if you need it)`;
+}
+
 function describe(name: string, a: Record<string, unknown>): string {
-  const p = typeof a.path === 'string' ? a.path : '';
+  const where = typeof a.hub === 'string' ? `${a.hub}${typeof a.repo === 'string' && a.repo ? `/${a.repo}` : ''}${typeof a.worktree === 'string' && a.worktree ? `@${a.worktree}` : ''}:` : '';
+  const p = `${where}${typeof a.path === 'string' ? a.path : ''}`;
   switch (name) {
+    case 'list_hubs':
+      return 'looking over the hubs';
+    case 'hub_overview':
+      return `looking at ${String(a.hub ?? '')}`;
+    case 'hub_tasks':
+      return `${String(a.hub ?? '')} tasks${a.status ? ` (${String(a.status)})` : ''}`;
+    case 'task_detail':
+      return `${String(a.hub ?? '')} ${String(a.task ?? '')}`;
+    case 'hub_feed':
+      return `${String(a.hub ?? '')} feed`;
+    case 'agent_log':
+      return `${String(a.hub ?? '')} ${String(a.agent ?? '')}'s log`;
+    case 'usage':
+      return `spend${a.hub ? ` of ${String(a.hub)}` : ''}`;
     case 'list_files':
       return `listing ${p || '.'}`;
     case 'read_file':
       return `reading ${p}`;
     case 'search':
-      return `searching ${String(a.pattern ?? '')}`;
+      return `searching ${where}${String(a.pattern ?? '')}`;
     case 'write_file':
       return `writing ${p}`;
     case 'edit_file':
@@ -494,6 +580,13 @@ function describe(name: string, a: Record<string, unknown>): string {
     default:
       return name;
   }
+}
+
+function chatPrompt(self: string, repoId?: string): string {
+  const who = userName();
+  return `You are Scout, a freelancer inside AgentCraft, a Minecraft town where ${who}'s AI agent teams work. Each hub is a studio with its own project and team (a Claude team, or you on the "${self}" hub). You are chatting with ${who}: answer what they ask, about anything. When it is about the town, look before you answer: list_hubs for the overview, then hub_overview, hub_tasks, task_detail, hub_feed, agent_log and usage for detail, and list_files, read_file and search to read any hub's code (a worktree id shows an agent's work in progress). Everything you see is read-only: you cannot change files, run commands, or act for a team; if ${who} wants work done, tell them which hub to give it to, or to send you a task with a repo.${repoId ? ` They picked repo ${repoId} of the ${self} hub to start from.` : ''}
+
+Reply with the answer tool (markdown allowed). Be concise and specific: name hubs, agents, task ids and files. ${who} may answer back.`;
 }
 
 function systemPrompt(mode: GoalMode, branch: string): string {

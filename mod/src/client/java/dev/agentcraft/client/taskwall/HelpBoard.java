@@ -73,6 +73,8 @@ final class HelpBoard {
 				new Row("right-click terminal", "pick a model and repo, type the request"),
 				new Row("Task", "changes in its own branch; review the merge (J)"),
 				new Row("Ask", "a question about the code; the answer comes in chat"),
+				new Row("Chat", "no repo needed; sees every hub, read-only"),
+				new Row("@scout <text>", "console: carry on the chat"),
 				new Row("@scout /model <id>", "console: switch model (e.g. openai/gpt-5-mini)"),
 				new Row("OPENROUTER_API_KEY", "your key, set in Windows (never in the world)"),
 				new Row("open.baseUrl", "config.json: a local Ollama or LM Studio instead")));

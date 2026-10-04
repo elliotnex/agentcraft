@@ -86,6 +86,11 @@ public final class Foreman {
 		return link().send(ForemanJson.msg("user.message").put("to", to).put("text", text).json());
 	}
 
+	/** {@link #message} to {@code hub}'s Foreman instead of the active one. */
+	public static CompletableFuture<Ack> messageTo(Hub hub, String to, String text) {
+		return hub.link().send(ForemanJson.msg("user.message").put("to", to).put("text", text).json());
+	}
+
 	/** Answer a decision with an option label (preferred) and/or free text. */
 	public static CompletableFuture<Ack> answer(String decisionId, @Nullable String option, @Nullable String text) {
 		return link().send(ForemanJson.msg("decision.answer").put("decisionId", decisionId).put("option", option).put("text", text).json());
