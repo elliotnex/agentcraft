@@ -231,6 +231,8 @@ public final class ForemanFeature {
 	private static int hubTick;
 	/** The hub plot the player stood in at the last check (null: outside every hub). */
 	private static @Nullable String lastHereId;
+	/** The hub that was active before the player walked into the freelancer's pavilion. */
+	private static @Nullable String beforePavilion;
 
 	/**
 	 * Keeps the links in step with the world's hubs ({@link HubRegistry}: a new hub gets its link) and
@@ -238,6 +240,11 @@ public final class ForemanFeature {
 	 * a hub picked by hand (console {@code /hub}) holds until the player enters another plot. Client
 	 * thread, every tick (cheap; the position check runs twice a second).
 	 */
+	private static boolean inPavilion(Minecraft mc) {
+		var b = dev.agentcraft.layout.Anchors.of(dev.agentcraft.hq.FreelancePavilion.HUB).bounds();
+		return b != null && b.contains(mc.player.getBlockX(), Math.max(b.minY(), Math.min(b.maxY(), mc.player.getBlockY())), mc.player.getBlockZ());
+	}
+
 	private static void followWorldHubs(Minecraft mc, boolean enabled) {
 		long rev = HubRegistry.revision();
 		if (rev != seenHubsRevision) {
@@ -247,6 +254,11 @@ public final class ForemanFeature {
 					Hubs.add(h.id(), h.name(), h.port(), enabled);
 				}
 			}
+		}
+		// the freelancer (Scout, any model) once the world has its pavilion: a hub without a registry entry
+		String fl = dev.agentcraft.hq.FreelancePavilion.HUB;
+		if (Hubs.get(fl) == null && hubTick % 20 == 0 && !dev.agentcraft.layout.Anchors.of(fl).isEmpty()) {
+			Hubs.add(fl, "Freelancer", dev.agentcraft.layout.HubProfiles.portFor(fl, java.util.Set.of(Hub.MAIN.equals(Hubs.active().id()) ? Hubs.active().port() : 7878)), enabled);
 		}
 		if (++hubTick % 10 != 0) {
 			return;
@@ -267,14 +279,25 @@ public final class ForemanFeature {
 		}
 		HubRegistry.Hub here = HubRegistry.at(mc.player.getX(), mc.player.getZ());
 		String hereId = here == null ? null : here.id();
+		if (hereId == null && inPavilion(mc)) {
+			hereId = dev.agentcraft.hq.FreelancePavilion.HUB;
+		}
 		if (java.util.Objects.equals(hereId, lastHereId)) {
 			return;
 		}
+
 		Hub hub = hereId == null ? null : Hubs.get(hereId);
 		if (hub != null) {
+			if (fl.equals(hereId) && !fl.equals(Hubs.active().id())) {
+				beforePavilion = Hubs.active().id();
+			}
 			Hubs.setActive(hub);
 			lastHereId = hereId;
 		} else if (hereId == null) {
+			// stepping out of the pavilion gives the HUD back to the hub you came from
+			if (fl.equals(lastHereId) && fl.equals(Hubs.active().id()) && beforePavilion != null && Hubs.get(beforePavilion) != null) {
+				Hubs.setActive(Hubs.get(beforePavilion));
+			}
 			lastHereId = null;
 		}
 	}

@@ -15,7 +15,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * The compass town's ground: a road ring hugging the fronts of the eight ring-1 studios, the plaza
- * inside it (fountain, garden beds, benches and the hub wall), and once a ring-2 hub exists, an outer
+ * inside it (fountain, garden beds, benches, the hub wall and the freelancer's pavilion), and once a ring-2 hub exists, an outer
  * road ring between the two rings of studios with eight spokes between the ring-1 studios. Its
  * measurements follow the world's spacing ({@link Geo}).
  *
@@ -125,6 +125,7 @@ final class CompassNetwork {
 		for (Piece pc : pieces) {
 			changed += buildPiece(level, pc, theme);
 		}
+		FreelancePavilion.publish(level.getServer(), g.cx(), g.cz());
 		String report = String.format(Locale.ROOT, "compass town for %d hub%s%s: %d blocks updated", hubs.size(), hubs.size() == 1 ? "" : "s",
 			ring2 ? " (two rings)" : "", changed);
 		AgentCraft.LOGGER.info("Hub network: {}", report);
@@ -291,6 +292,8 @@ final class CompassNetwork {
 		kiosk(p, cx, cz - 22, Direction.SOUTH, 13, 4, "help:keys");
 		kiosk(p, cx - 22, cz, Direction.EAST, 13, 4, "help:console");
 		kiosk(p, cx + 22, cz, Direction.WEST, 13, 4, "help:hubs");
+		// the freelancer's pavilion, north-east of the fountain
+		FreelancePavilion.draw(p, cx, cz);
 	}
 
 	/**

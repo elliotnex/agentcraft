@@ -57,6 +57,11 @@ public final class ConsoleFeature {
 
 	public static void open(String prefill, boolean byKey) {
 		Minecraft mc = Minecraft.getInstance();
+		// the terminal in the freelancer's pavilion: model, repo and request for Scout
+		if (!byKey && prefill == null && dev.agentcraft.client.freelance.FreelanceFeature.active()) {
+			dev.agentcraft.client.freelance.FreelanceFeature.openTerminal();
+			return;
+		}
 		ConsoleScreen s = new ConsoleScreen(prefill);
 		if (byKey) {
 			s.openedByKey();

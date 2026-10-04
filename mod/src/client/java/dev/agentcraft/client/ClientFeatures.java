@@ -41,6 +41,7 @@ public final class ClientFeatures {
 		LibraryFeature.init();
 		PermissionsFeature.init();
 		dev.agentcraft.client.hubs.HubsFeature.init();   // hubs overview (H), travel, cross-hub answers
+		dev.agentcraft.client.freelance.FreelanceFeature.init(); // the plaza pavilion: Scout on any model
 		AgentCraft.LOGGER.info("AgentCraft client features initialised");
 	}
 }

@@ -101,6 +101,18 @@ public final class Foreman {
 		return link().send(ForemanJson.msg("agent.action").put("agentId", agentId).put("action", action).put("arg", arg).json());
 	}
 
+	/**
+	 * A goal for a specific hub's Foreman (the freelancer's terminal): {@code model} and {@code mode}
+	 * (task | ask) are for the open backend; null leaves them to the Foreman.
+	 */
+	public static CompletableFuture<Ack> submitGoalTo(Hub hub, String text, @Nullable String repoId, @Nullable String model, @Nullable String mode) {
+		return hub.link().send(ForemanJson.msg("goal.submit").put("text", text).put("repoId", repoId).put("model", model).put("mode", mode).json());
+	}
+
+	public static CompletableFuture<Ack> addRepoTo(Hub hub, String path) {
+		return hub.link().send(ForemanJson.msg("repo.add").put("path", path).json());
+	}
+
 	public static CompletableFuture<Ack> addRepo(String path) {
 		return link().send(ForemanJson.msg("repo.add").put("path", path).json());
 	}

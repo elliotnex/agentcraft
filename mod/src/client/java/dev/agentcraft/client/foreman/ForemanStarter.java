@@ -78,6 +78,9 @@ final class ForemanStarter {
 		}
 		inner.append("& ").append(psQuote(launch.toString())).append(" -NoGame -Profile ").append(psQuote(profile)).append(" -Port ")
 			.append(hub.port());
+		if (dev.agentcraft.hq.FreelancePavilion.HUB.equals(hub.id())) {
+			inner.append(" -Backend open"); // Scout on any model (OPENROUTER_API_KEY from the user's environment)
+		}
 		// a WMI-created process gets the user's default environment, not ours: pass a non-default home on
 		String home = System.getenv("AGENTCRAFT_HOME");
 		if (home != null && !home.isBlank()) {
