@@ -73,6 +73,13 @@ final class Plan {
 	private final Map<BlockPos, String> bindings = new LinkedHashMap<>();
 	/** Material swaps for the hub's look ({@link Theme}); WARM changes nothing. */
 	private Theme theme = Theme.WARM;
+	/** Cells some builder set explicitly (not left as meadow). */
+	private BitSet touched = new BitSet();
+	/**
+	 * Sparse plans (the hub network) only claim the cells they set: on a first build, with no record
+	 * of a previous one, everything else in the box is left as it is (it may be the player's).
+	 */
+	private boolean sparse;
 
 	/**
 	 * @param changed cells written in the first pass; {@code connected}: cells whose connections
@@ -141,9 +148,15 @@ final class Plan {
 		this.theme = t;
 	}
 
+	void sparse(boolean s) {
+		this.sparse = s;
+	}
+
 	void set(int x, int y, int z, BlockState state) {
 		if (in(x, y, z)) {
-			cells[index(x, y, z)] = theme.apply(state);
+			int i = index(x, y, z);
+			cells[i] = theme.apply(state);
+			touched.set(i);
 		}
 	}
 
@@ -328,6 +341,9 @@ final class Plan {
 						for (int x = x0; x <= x1; x++) {
 							// x, z: world; the plan cell is (x - ox, y, z - oz)
 							int i = index(x - ox, y, z - oz);
+							if (sparse && previous == null && !touched.get(i)) {
+								continue; // first build of a sparse plan: only its own cells
+							}
 							BlockState want = cells[i];
 							m.set(x, y, z);
 							BlockState cur = chunk.getBlockState(m);

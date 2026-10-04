@@ -138,6 +138,26 @@ final class HqLandscape {
 		foundationPlanting(p);
 		outdoorLight(p);
 		meadow(p);
+		exit(p);
+	}
+
+	/**
+	 * The main path continues through the lychgate to the edge of the grounds, where the hub network's
+	 * spur ({@link NetworkBuilder}) takes it on to the promenade. Last, so nothing grows on it.
+	 */
+	private static void exit(Plan p) {
+		int cx = pathX(GATE_Z);
+		for (int z = GATE_Z + 2; z <= SITE[5]; z++) {
+			int t = p.top(cx, z);
+			for (int x = cx - 2; x <= cx + 2; x++) {
+				for (int y = t + 1; y <= t + 6; y++) {
+					p.set(x, y, z, StudioHqBuilder.AIR);
+				}
+				if (Math.abs(x - cx) <= 1) {
+					p.set(x, p.top(x, z), z, Blocks.DIRT_PATH.defaultBlockState());
+				}
+			}
+		}
 	}
 
 	/**

@@ -23,7 +23,9 @@ import net.minecraft.server.level.ServerPlayer;
  * /agentcraft hub build &lt;id&gt; [force]    (re)build a hub's studio
  * /agentcraft hub theme &lt;id&gt; &lt;theme&gt;    give a hub's studio another look and rebuild it
  *                                       (warm, cherry, birch, ember, midnight)
+ * /agentcraft hub paths                 (re)build the promenade, spurs and courtyard between hubs
  * </pre>
+ * Creating, re-theming or rebuilding a hub also updates the paths.
  */
 final class HubCommands {
 	private HubCommands() {
@@ -32,6 +34,7 @@ final class HubCommands {
 	static void register() {
 		AgentCraftCommands.sub(root -> root.then(Commands.literal("hub")
 			.then(Commands.literal("list").executes(HubCommands::list))
+			.then(Commands.literal("paths").executes(HubCommands::paths))
 			.then(Commands.literal("create")
 				.then(Commands.argument("id", StringArgumentType.word())
 					.executes(ctx -> create(ctx, ""))
@@ -139,7 +142,20 @@ final class HubCommands {
 		String report = HqFeature.lastReport();
 		ctx.getSource().sendSuccess(() -> Component.literal("Built hub '" + hub.id() + "': " + layout.anchors().size() + " anchors"
 			+ (report == null ? "" : ". " + report)), true);
+		paths(ctx);
 		return 1;
+	}
+
+	private static int paths(CommandContext<CommandSourceStack> ctx) {
+		try {
+			String report = NetworkBuilder.buildAll(ctx.getSource().getLevel());
+			ctx.getSource().sendSuccess(() -> Component.literal("Hub network: " + report), true);
+			return 1;
+		} catch (RuntimeException e) {
+			AgentCraft.LOGGER.error("Building the hub network failed", e);
+			ctx.getSource().sendFailure(Component.literal("Building the paths failed: " + e.getMessage()));
+			return 0;
+		}
 	}
 
 	private static int teleport(CommandContext<CommandSourceStack> ctx, HubRegistry.Hub hub) {
