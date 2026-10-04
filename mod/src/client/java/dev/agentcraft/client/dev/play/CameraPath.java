@@ -192,7 +192,7 @@ final class CameraPath {
 			return key;
 		}
 		String name = f.nonBlank("anchor");
-		Anchor a = Anchors.get(name);
+		Anchor a = dev.agentcraft.client.foreman.Foreman.anchor(name);
 		if (a == null) {
 			throw new DevException("camera.keys[" + index + "]: unknown anchor '" + name + "' (see dev.anchors)");
 		}

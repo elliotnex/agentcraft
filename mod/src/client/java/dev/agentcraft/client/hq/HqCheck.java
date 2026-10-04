@@ -106,7 +106,7 @@ final class HqCheck {
 	static JsonObject check(Minecraft mc, int minLight) {
 		JsonObject o = new JsonObject();
 		ClientLevel level = mc.level;
-		Anchors.Layout layout = Anchors.current();
+		Anchors.Layout layout = dev.agentcraft.client.foreman.Foreman.layout();
 		if (level == null || layout.isEmpty() || layout.bounds() == null) {
 			o.addProperty("error", "no level or no layout");
 			return o;

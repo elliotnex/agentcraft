@@ -67,7 +67,7 @@ public final class HqWorldDriver {
 
 	private static @Nullable Wanted last;
 	private static long lastRevision = -1;
-	private static long lastLayout = -1;
+	private static dev.agentcraft.layout.Anchors.@org.jspecify.annotations.Nullable Layout lastLayout;
 	private static int ticks;
 	private static volatile int lastChanged;
 
@@ -88,18 +88,18 @@ public final class HqWorldDriver {
 			return;
 		}
 		ForemanState st = Foreman.state();
-		Anchors.Layout layout = Anchors.current();
+		Anchors.Layout layout = Foreman.layout();
 		if (st == null || !st.hasData() || st.isStale() || layout.isEmpty() || layout.bounds() == null) {
 			return;
 		}
 		ticks++;
-		boolean changed = st.revision() != lastRevision || layout.revision() != lastLayout;
+		boolean changed = st.revision() != lastRevision || layout != lastLayout;
 		if (!changed && ticks % RESYNC_TICKS != 0) {
 			return;
 		}
 		Wanted w = changed || last == null ? compute(st) : last;
 		lastRevision = st.revision();
-		lastLayout = layout.revision();
+		lastLayout = layout;
 		boolean differs = !Objects.equals(w, last);
 		last = w;
 		if (differs || ticks % RESYNC_TICKS == 0) {

@@ -79,7 +79,7 @@ public final class Seats {
 	 * (otherwise a seated agent would type in the air; it stands at {@code desk_<id>} instead).
 	 */
 	private static @Nullable Seat deskChair(BlockGetter level, Anchor desk, @Nullable GridPathfinder pathfinder) {
-		Anchor chair = Anchors.get("seat_" + desk.name().substring(AnchorNames.DESK_PREFIX.length()));
+		Anchor chair = dev.agentcraft.client.foreman.Foreman.anchor("seat_" + desk.name().substring(AnchorNames.DESK_PREFIX.length()));
 		if (chair == null) {
 			return null;
 		}

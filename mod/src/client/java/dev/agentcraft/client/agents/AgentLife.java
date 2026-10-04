@@ -2,6 +2,7 @@ package dev.agentcraft.client.agents;
 
 import dev.agentcraft.client.foreman.Protocol.AgentSay;
 import dev.agentcraft.client.foreman.Protocol.AgentState;
+import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
@@ -602,7 +603,7 @@ public final class AgentLife {
 			return null; // a glance away from the screen
 		}
 		if (v.station.equals("desk") && (posture == Posture.SIT_TYPE || posture == Posture.SIT_IDLE || posture == Posture.TYPE_STAND)) {
-			Anchor mon = Anchors.get(AnchorNames.monitor(v.id));
+			Anchor mon = Foreman.anchor(AnchorNames.monitor(v.id));
 			if (mon != null && mon.pos().distanceToSqr(e.position()) < 9) {
 				return new Vec3(mon.x(), mon.y() - 0.12, mon.z());
 			}

@@ -58,7 +58,8 @@ public final class HqClientFeature {
 
 	private static JsonObject stateJson() {
 		JsonObject o = new JsonObject();
-		Anchors.Layout l = Anchors.current();
+		Anchors.Layout l = dev.agentcraft.client.foreman.Foreman.layout();
+		o.addProperty("hub", dev.agentcraft.client.foreman.Foreman.hub().id());
 		o.addProperty("layout", l.name());
 		o.addProperty("revision", l.revision());
 		o.addProperty("lastChanged", HqWorldDriver.lastChanged());
@@ -125,7 +126,7 @@ public final class HqClientFeature {
 	private static void scan(ClientLevel level) {
 		waitingLamps.clear();
 		openPodiums.clear();
-		Anchors.Layout l = Anchors.current();
+		Anchors.Layout l = dev.agentcraft.client.foreman.Foreman.layout();
 		if (l.bounds() == null) {
 			return;
 		}

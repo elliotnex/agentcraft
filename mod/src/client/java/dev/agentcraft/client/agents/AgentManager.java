@@ -65,7 +65,8 @@ public final class AgentManager {
 	private final Map<String, Integer> awaitingCounts = new HashMap<>();
 	private long awaitingRevision = -1;
 	private @Nullable ClientLevel level;
-	private long layoutRevision = -1;
+	private Anchors.@Nullable Layout lastLayout;
+	private @Nullable String lastHub;
 	private int nextEntityId = -10_000;
 	private int pathFailures;
 	private long ticks;
@@ -126,7 +127,7 @@ public final class AgentManager {
 			seats.clear();
 			userSpots.clear();
 			level = lvl;
-			layoutRevision = -1;
+			lastLayout = null;
 		}
 		if (lvl == null) {
 			return;
@@ -137,9 +138,18 @@ public final class AgentManager {
 			removeAll();
 			return;
 		}
-		Anchors.Layout layout = Anchors.current();
-		boolean relayout = layout.revision() != layoutRevision;
-		layoutRevision = layout.revision();
+		// the team of the hub the player is in, in that hub's studio; another hub's team is a
+		// different set of agents (same ids): respawn them rather than walk them across the world
+		String hub = Foreman.hub().id();
+		if (!hub.equals(lastHub)) {
+			removeAll();
+			assigner.clear();
+			awaitingRevision = -1;
+			lastHub = hub;
+		}
+		Anchors.Layout layout = Foreman.layout();
+		boolean relayout = layout != lastLayout;
+		lastLayout = layout;
 		if (relayout) {
 			seats.clear();
 			userSpots.clear();
@@ -353,7 +363,7 @@ public final class AgentManager {
 		ClientAgentEntity e = new ClientAgentEntity(lvl, a.id(), AgentSkins.get(a.id(), a.skin()));
 		// Negative ids never collide with server-assigned entity ids.
 		e.setId(nextEntityId--);
-		Seats.Seat seat = seats.at(lvl, target, ticks, new GridPathfinder(lvl, Anchors.current().bounds()));
+		Seats.Seat seat = seats.at(lvl, target, ticks, new GridPathfinder(lvl, Foreman.layout().bounds()));
 		e.life().setSeat(seat);
 		place(e, seat != null ? seat.target() : target);
 		lvl.addEntity(e);

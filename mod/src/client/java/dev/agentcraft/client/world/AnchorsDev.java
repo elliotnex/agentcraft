@@ -22,7 +22,7 @@ public final class AnchorsDev {
 				+ " (see AnchorNames). Use with dev.camera {anchor}",
 			(req, mc) -> {
 				String prefix = Fields.of(req).optStr("prefix", "");
-				Anchors.Layout layout = Anchors.current();
+				Anchors.Layout layout = dev.agentcraft.client.foreman.Foreman.layout();
 				JsonObject o = new JsonObject();
 				o.addProperty("layout", layout.name());
 				o.addProperty("revision", layout.revision());

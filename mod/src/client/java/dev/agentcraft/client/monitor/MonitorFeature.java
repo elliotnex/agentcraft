@@ -169,10 +169,16 @@ public final class MonitorFeature {
 		if (!binding.isEmpty()) {
 			return binding;
 		}
-		Anchors.Layout layout = Anchors.current();
-		if (layout.revision() != resolvedLayoutRevision || !layout.name().equals(resolvedLayoutName)) {
+		// the layout of the studio this monitor stands in (cached positions are world positions, so a
+		// cache shared by every studio stays valid; it is cleared when any studio is rebuilt)
+		Anchors.Layout layout = dev.agentcraft.client.foreman.Foreman.layoutAt(be.getBlockPos().getX());
+		long rev = 0;
+		for (Anchors.Layout l : Anchors.all().values()) {
+			rev = rev * 31 + l.revision();
+		}
+		if (rev != resolvedLayoutRevision || !layout.name().equals(resolvedLayoutName)) {
 			RESOLVED.clear();
-			resolvedLayoutRevision = layout.revision();
+			resolvedLayoutRevision = rev;
 			resolvedLayoutName = layout.name();
 		}
 		BlockPos origin = be.getBlockPos();

@@ -400,10 +400,10 @@ final class DevCommands {
 			return json;
 		}
 		String name = f.nonBlank("anchor");
-		dev.agentcraft.layout.Anchor a = dev.agentcraft.layout.Anchors.get(name);
+		dev.agentcraft.layout.Anchor a = dev.agentcraft.client.foreman.Foreman.anchor(name);
 		if (a == null) {
-			throw new DevException("unknown anchor '" + name + "' (layout '" + dev.agentcraft.layout.Anchors.current().name()
-				+ "' has " + dev.agentcraft.layout.Anchors.current().anchors().size() + " anchors; see dev.anchors; build one with /agentcraft hq)");
+			throw new DevException("unknown anchor '" + name + "' (layout '" + dev.agentcraft.client.foreman.Foreman.layout().name()
+				+ "' has " + dev.agentcraft.client.foreman.Foreman.layout().anchors().size() + " anchors; see dev.anchors; build one with /agentcraft hq)");
 		}
 		JsonObject out = json.deepCopy();
 		out.remove("anchor");

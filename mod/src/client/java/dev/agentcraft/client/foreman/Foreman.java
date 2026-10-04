@@ -39,6 +39,26 @@ public final class Foreman {
 		return Hubs.active().link();
 	}
 
+	/**
+	 * The active hub's studio layout: the world-bound features (agents, lamps, monitors) live in the
+	 * studio the player is in. A hub switch hands out a different Layout instance, so compare layouts
+	 * by identity, not by revision (every hub's first build is revision 1).
+	 */
+	public static dev.agentcraft.layout.Anchors.Layout layout() {
+		return dev.agentcraft.layout.Anchors.of(Hubs.active().id());
+	}
+
+	/** The layout of the studio at world x (the active hub's when x is in no hub's slot). */
+	public static dev.agentcraft.layout.Anchors.Layout layoutAt(double x) {
+		dev.agentcraft.layout.HubRegistry.Hub h = dev.agentcraft.layout.HubRegistry.at(x);
+		return h == null ? layout() : dev.agentcraft.layout.Anchors.of(h.id());
+	}
+
+	/** A named anchor of the active hub's studio, or null. */
+	public static dev.agentcraft.layout.@Nullable Anchor anchor(String name) {
+		return layout().get(name);
+	}
+
 	/** Hears the active hub; on a hub switch it gets the new hub's model as a snapshot. */
 	public static void addListener(ForemanListener l) {
 		Hubs.addActiveListener(l);
