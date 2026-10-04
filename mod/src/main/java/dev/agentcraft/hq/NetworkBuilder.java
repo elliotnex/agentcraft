@@ -67,8 +67,16 @@ final class NetworkBuilder {
 	private NetworkBuilder() {
 	}
 
-	/** Builds (or updates) every built hub's segment. Server thread. */
+	/** Builds (or updates) the paths of the world's layout (compass or line). Server thread. */
 	static String buildAll(ServerLevel level) {
+		if (HubRegistry.COMPASS.equals(HubRegistry.layout())) {
+			return CompassNetwork.build(level);
+		}
+		return buildLine(level);
+	}
+
+	/** The line layout: one segment per hub. */
+	static String buildLine(ServerLevel level) {
 		List<HubRegistry.Hub> hubs = new ArrayList<>(HubRegistry.all());
 		hubs.removeIf(h -> Anchors.of(h.id()).isEmpty());
 		hubs.sort((a, b) -> Integer.compare(a.slot(), b.slot()));
@@ -182,14 +190,14 @@ final class NetworkBuilder {
 		}
 	}
 
-	private static void post(Plan p, int x, int z) {
+	static void post(Plan p, int x, int z) {
 		p.set(x, GROUND + 1, z, WALL);
 		p.set(x, GROUND + 2, z, WALL);
 		p.set(x, GROUND + 3, z, StudioHqBuilder.LANTERN);
 	}
 
 	/** A 3x3 bed with a small tree, edged in stone-brick slabs. */
-	private static void planter(Plan p, int x, int z) {
+	static void planter(Plan p, int x, int z) {
 		for (int dx = -1; dx <= 1; dx++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				p.set(x + dx, GROUND, z + dz, GRASS);
@@ -271,12 +279,16 @@ final class NetworkBuilder {
 	 * a row, 3 blocks of height per row (the client lays them out the same way).
 	 */
 	private static void hubWall(Plan p, int cx, int hubCount) {
+		hubWall(p, cx, YARD_Z1 - 1, hubCount);
+	}
+
+	/** The hub wall centred on x {@code cx}, its board on line {@code z} facing north, backed at z + 1. */
+	static void hubWall(Plan p, int cx, int z, int hubCount) {
 		int cols = Math.max(1, Math.min(hubCount, WALL_COLS));
 		int rows = (hubCount + WALL_COLS - 1) / WALL_COLS;
 		int w = Math.max(7, 4 * cols + 1);
 		int bx0 = cx - w / 2;
 		int bx1 = bx0 + w - 1;
-		int z = YARD_Z1 - 1;
 		int y0 = GROUND + 2;
 		int y1 = y0 + 3 * Math.max(1, rows) - 1;
 		BlockState board = ModBlocks.TASK_BOARD.defaultBlockState().setValue(PanelBlock.FACING, Direction.NORTH);
@@ -301,7 +313,7 @@ final class NetworkBuilder {
 		post(p, bx1 + 3, z);
 	}
 
-	private static void tree(Plan p, int x, int z) {
+	static void tree(Plan p, int x, int z) {
 		p.set(x, GROUND, z, GRASS);
 		for (int y = GROUND + 1; y <= GROUND + 3; y++) {
 			p.set(x, y, z, St.log(Blocks.SPRUCE_LOG, Direction.Axis.Y));
@@ -318,7 +330,7 @@ final class NetworkBuilder {
 		p.set(x, GROUND + 5, z, St.leaves(Blocks.AZALEA_LEAVES));
 	}
 
-	private static void writeSign(ServerLevel level, BlockPos pos, String[] lines) {
+	static void writeSign(ServerLevel level, BlockPos pos, String[] lines) {
 		if (!(level.getBlockEntity(pos) instanceof SignBlockEntity sign)) {
 			return;
 		}

@@ -127,12 +127,12 @@ public final class Anchors {
 	}
 
 	public static Builder builder(String layoutName) {
-		return new Builder(layoutName, HubRegistry.MAIN, 0, 0);
+		return new Builder(layoutName, HubRegistry.MAIN, Placement.IDENTITY);
 	}
 
-	/** A builder for {@code hub}'s studio: positions given in studio coordinates are moved to the hub's origin. */
+	/** A builder for {@code hub}'s studio: studio coordinates are moved to the hub's spot and turned to face its way. */
 	public static Builder builder(String layoutName, HubRegistry.Hub hub) {
-		return new Builder(layoutName, hub.id(), hub.originX(), 0);
+		return new Builder(layoutName, hub.id(), hub.placement());
 	}
 
 	/** Make {@code layout} the main hub's current layout and save it with the world. Call on the server thread. */
@@ -264,38 +264,32 @@ public final class Anchors {
 
 	/** Collects anchors while an HQ builder runs. Later puts with the same name replace earlier ones. */
 	/**
-	 * Collects a layout. Builders work in studio coordinates; {@code offsetX/offsetZ} (the hub's
-	 * origin) are added to every anchor and to the bounds.
+	 * Collects a layout. Builders work in studio coordinates (gate facing south); the hub's
+	 * {@link Placement} moves and turns every anchor (yaw included) and the bounds.
 	 */
 	public static final class Builder {
 		private final String name;
 		private final String hub;
-		private final int offsetX;
-		private final int offsetZ;
+		private final Placement placement;
 		private final Map<String, Anchor> anchors = new LinkedHashMap<>();
 		private @Nullable Bounds bounds;
 
-		private Builder(String name, String hub, int offsetX, int offsetZ) {
+		private Builder(String name, String hub, Placement placement) {
 			this.name = name;
 			this.hub = hub;
-			this.offsetX = offsetX;
-			this.offsetZ = offsetZ;
+			this.placement = placement;
 		}
 
 		public String hub() {
 			return hub;
 		}
 
-		public int offsetX() {
-			return offsetX;
-		}
-
-		public int offsetZ() {
-			return offsetZ;
+		public Placement placement() {
+			return placement;
 		}
 
 		public Builder put(String anchorName, double x, double y, double z, float yaw, float pitch) {
-			anchors.put(anchorName, new Anchor(anchorName, x + offsetX, y, z + offsetZ, yaw, pitch));
+			anchors.put(anchorName, new Anchor(anchorName, placement.worldX(x, z), y, placement.worldZ(x, z), placement.yaw(yaw), pitch));
 			return this;
 		}
 
@@ -321,8 +315,8 @@ public final class Anchors {
 		}
 
 		public Builder bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-			this.bounds = new Bounds(Math.min(minX, maxX) + offsetX, Math.min(minY, maxY), Math.min(minZ, maxZ) + offsetZ,
-				Math.max(minX, maxX) + offsetX, Math.max(minY, maxY), Math.max(minZ, maxZ) + offsetZ);
+			int[] b = placement.box(Math.min(minX, maxX), Math.min(minZ, maxZ), Math.max(minX, maxX), Math.max(minZ, maxZ));
+			this.bounds = new Bounds(b[0], Math.min(minY, maxY), b[1], b[2], Math.max(minY, maxY), b[3]);
 			return this;
 		}
 

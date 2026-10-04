@@ -260,7 +260,7 @@ public final class ForemanFeature {
 		if (mc.player == null) {
 			return;
 		}
-		HubRegistry.Hub here = HubRegistry.at(mc.player.getX());
+		HubRegistry.Hub here = HubRegistry.at(mc.player.getX(), mc.player.getZ());
 		Hub hub = here == null ? null : Hubs.get(here.id());
 		if (hub != null) {
 			Hubs.setActive(hub);

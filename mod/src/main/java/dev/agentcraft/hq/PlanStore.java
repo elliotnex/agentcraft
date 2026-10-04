@@ -117,6 +117,30 @@ final class PlanStore {
 		}
 	}
 
+	/** The box and builder of a stored record ({box, builder}), or null when there is none. */
+	static @Nullable Object[] stored(MinecraftServer server, String hub) {
+		Path f = file(server, hub);
+		if (!Files.exists(f)) {
+			return null;
+		}
+		try {
+			CompoundTag root = NbtIo.readCompressed(f, NbtAccounter.unlimitedHeap());
+			return new Object[] {root.getIntArray("box").orElse(new int[0]), root.getStringOr("builder", "")};
+		} catch (IOException | RuntimeException e) {
+			AgentCraft.LOGGER.warn("Could not read {}", f, e);
+			return null;
+		}
+	}
+
+	/** Forgets a record (its ground was cleared, or the studio moved). */
+	static void delete(MinecraftServer server, String hub) {
+		try {
+			Files.deleteIfExists(file(server, hub));
+		} catch (IOException e) {
+			AgentCraft.LOGGER.warn("Could not delete the plan record of {}", hub, e);
+		}
+	}
+
 	static boolean exists(MinecraftServer server, String hub) {
 		return Files.exists(file(server, hub));
 	}

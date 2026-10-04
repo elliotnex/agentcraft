@@ -23,7 +23,8 @@ import net.minecraft.server.level.ServerPlayer;
  * /agentcraft hub build &lt;id&gt; [force]    (re)build a hub's studio
  * /agentcraft hub theme &lt;id&gt; &lt;theme&gt;    give a hub's studio another look and rebuild it
  *                                       (warm, cherry, birch, ember, midnight)
- * /agentcraft hub paths                 (re)build the promenade, spurs and courtyard between hubs
+ * /agentcraft hub paths                 (re)build the roads and plaza between hubs
+ * /agentcraft hub layout compass        turn a world of hubs in a line into a compass town
  * </pre>
  * Creating, re-theming or rebuilding a hub also updates the paths.
  */
@@ -35,6 +36,7 @@ final class HubCommands {
 		AgentCraftCommands.sub(root -> root.then(Commands.literal("hub")
 			.then(Commands.literal("list").executes(HubCommands::list))
 			.then(Commands.literal("paths").executes(HubCommands::paths))
+			.then(Commands.literal("layout").then(Commands.literal("compass").executes(HubCommands::toCompass)))
 			.then(Commands.literal("create")
 				.then(Commands.argument("id", StringArgumentType.word())
 					.executes(ctx -> create(ctx, ""))
@@ -67,8 +69,8 @@ final class HubCommands {
 		for (HubRegistry.Hub h : HubRegistry.all()) {
 			boolean built = !Anchors.of(h.id()).isEmpty();
 			String port = h.port() == 0 ? "default port" : "port " + h.port();
-			ctx.getSource().sendSuccess(() -> Component.literal(String.format(Locale.ROOT, "%s \"%s\": slot %d (x %d), %s, theme %s, %s", h.id(), h.name(),
-				h.slot(), h.originX(), port, Theme.byId(h.theme()).name, built ? "built" : "not built")), false);
+			ctx.getSource().sendSuccess(() -> Component.literal(String.format(Locale.ROOT, "%s \"%s\": at (%d, %d) facing %s, %s, theme %s, %s", h.id(),
+				h.name(), h.x(), h.z(), TownLayout.facingName(h.facing()), port, Theme.byId(h.theme()).name, built ? "built" : "not built")), false);
 		}
 		return HubRegistry.all().size();
 	}
@@ -85,7 +87,8 @@ final class HubCommands {
 		if (buildHub(ctx, hub, false) == 0) {
 			return 0;
 		}
-		ctx.getSource().sendSuccess(() -> Component.literal("Hub '" + hub.id() + "' created in slot " + hub.slot() + " (Foreman port "
+		ctx.getSource().sendSuccess(() -> Component.literal("Hub '" + hub.id() + "' created at (" + hub.x() + ", " + hub.z() + "), facing "
+			+ TownLayout.facingName(hub.facing()) + " (Foreman port "
 			+ hub.port() + ")"), true);
 		teleport(ctx, hub);
 		return 1;
@@ -144,6 +147,19 @@ final class HubCommands {
 			+ (report == null ? "" : ". " + report)), true);
 		paths(ctx);
 		return 1;
+	}
+
+	private static int toCompass(CommandContext<CommandSourceStack> ctx) {
+		try {
+			for (String line : TownLayout.toCompass(ctx.getSource().getLevel())) {
+				ctx.getSource().sendSuccess(() -> Component.literal(line), true);
+			}
+			return 1;
+		} catch (RuntimeException e) {
+			AgentCraft.LOGGER.error("Converting to the compass layout failed", e);
+			ctx.getSource().sendFailure(Component.literal("Converting the town failed: " + e.getMessage()));
+			return 0;
+		}
 	}
 
 	private static int paths(CommandContext<CommandSourceStack> ctx) {

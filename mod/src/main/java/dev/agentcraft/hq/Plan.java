@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntFunction;
+import dev.agentcraft.layout.Placement;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -311,14 +312,20 @@ final class Plan {
 	 * @param force set every cell to the plan even where the player changed it.
 	 */
 	Stats apply(ServerLevel level, BlockState @Nullable [] previous, boolean force) {
-		return apply(level, previous, force, 0, 0);
+		return apply(level, previous, force, Placement.IDENTITY);
+	}
+
+	/** {@code cells[i]} as it stands in the world: turned with the studio. */
+	private static BlockState turned(BlockState s, Placement pl) {
+		return pl.turns() == 0 ? s : s.rotate(pl.rotation());
 	}
 
 	/**
-	 * Applies the plan with its studio coordinates moved by ({@code ox}, 0, {@code oz}) in the world:
-	 * a hub's studio is the same plan built at the hub's origin.
+	 * Applies the plan placed in the world ({@link Placement}: moved to the hub's origin and turned to
+	 * face its way): a hub's studio is the same plan built at the hub's spot. Every world cell of the
+	 * placed box maps back to one plan cell; blocks turn with the studio (stairs, logs, facings).
 	 */
-	Stats apply(ServerLevel level, BlockState @Nullable [] previous, boolean force, int ox, int oz) {
+	Stats apply(ServerLevel level, BlockState @Nullable [] previous, boolean force, Placement pl) {
 		long t0 = System.nanoTime();
 		int changed = 0;
 		int kept = 0;
@@ -329,29 +336,31 @@ final class Plan {
 		List<BlockPos> deferred = new ArrayList<>();
 		boolean guard = previous != null && previous.length == cells.length && !force;
 		BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-		for (int cx = (minX + ox) >> 4; cx <= (maxX + ox) >> 4; cx++) {
-			for (int cz = (minZ + oz) >> 4; cz <= (maxZ + oz) >> 4; cz++) {
+		int[] wb = pl.box(minX, minZ, maxX, maxZ);
+		for (int cx = wb[0] >> 4; cx <= wb[2] >> 4; cx++) {
+			for (int cz = wb[1] >> 4; cz <= wb[3] >> 4; cz++) {
 				LevelChunk chunk = level.getChunk(cx, cz);
-				int x0 = Math.max(minX + ox, cx << 4);
-				int x1 = Math.min(maxX + ox, (cx << 4) + 15);
-				int z0 = Math.max(minZ + oz, cz << 4);
-				int z1 = Math.min(maxZ + oz, (cz << 4) + 15);
+				int x0 = Math.max(wb[0], cx << 4);
+				int x1 = Math.min(wb[2], (cx << 4) + 15);
+				int z0 = Math.max(wb[1], cz << 4);
+				int z1 = Math.min(wb[3], (cz << 4) + 15);
 				for (int y = minY; y <= maxY; y++) {
 					for (int z = z0; z <= z1; z++) {
 						for (int x = x0; x <= x1; x++) {
-							// x, z: world; the plan cell is (x - ox, y, z - oz)
-							int i = index(x - ox, y, z - oz);
+							// x, z: world; the plan cell is the placement's inverse of it
+							int i = index(pl.localX(x, z), y, pl.localZ(x, z));
 							if (sparse && previous == null && !touched.get(i)) {
 								continue; // first build of a sparse plan: only its own cells
 							}
-							BlockState want = cells[i];
+							BlockState want = turned(cells[i], pl);
 							m.set(x, y, z);
 							BlockState cur = chunk.getBlockState(m);
 							if (cur != want && !sameDesign(cur, want)) {
-								if (guard && !sameDesign(cur, previous[i])) {
+								BlockState before = guard ? turned(previous[i], pl) : null;
+								if (guard && !sameDesign(cur, before)) {
 									// the player changed this cell after the last build: leave it (terrain that only
 									// reacted to a player's block, e.g. grass turned to dirt under it, is kept silently)
-									if (!(natural(cur) && natural(previous[i]))) {
+									if (!(natural(cur) && natural(before))) {
 										kept++;
 									}
 									keptCells.set(i);
@@ -360,7 +369,7 @@ final class Plan {
 									}
 									continue;
 								}
-								if (!cur.isAir() && (previous == null || !sameDesign(cur, previous[i])) && !natural(cur)) {
+								if (!cur.isAir() && (previous == null || !sameDesign(cur, turned(previous[i], pl))) && !natural(cur)) {
 									foreign++;
 								}
 							}
@@ -389,7 +398,8 @@ final class Plan {
 		int connected = 0;
 		for (BlockPos p : deferred) {
 			BlockState cur = level.getBlockState(p);
-			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX() - ox, p.getY(), p.getZ() - oz)]), level, p);
+			BlockState planned = turned(cells[index(pl.localX(p.getX(), p.getZ()), p.getY(), pl.localZ(p.getX(), p.getZ()))], pl);
+			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, planned), level, p);
 			if (cur != want) {
 				note(sample, p, cur, want);
 				level.setBlock(p, want, FLAGS);
@@ -402,14 +412,15 @@ final class Plan {
 			if (in(p.getX(), p.getY(), p.getZ()) && keptCells.get(index(p.getX(), p.getY(), p.getZ()))) {
 				continue;
 			}
-			if (level.getBlockEntity(p.offset(ox, 0, oz)) instanceof StationBlockEntity be) {
+			BlockPos w = new BlockPos(pl.worldX(p.getX(), p.getZ()), p.getY(), pl.worldZ(p.getX(), p.getZ()));
+			if (level.getBlockEntity(w) instanceof StationBlockEntity be) {
 				if (!be.binding().equals(e.getValue())) {
 					bound++;
 				}
 				be.setBinding(e.getValue());
 			}
 		}
-		int items = clearDrops(level, ox, oz);
+		int items = clearDrops(level, wb);
 		return new Stats(cells.length, changed, connected, bound, kept, foreign, items, (System.nanoTime() - t0) / 1000, sample, keptSample);
 	}
 
@@ -424,8 +435,8 @@ final class Plan {
 	 * Removes dropped items and experience orbs inside the box (a switch from another builder can
 	 * leave items behind, e.g. carpets that lost their floor). Players, agents and other mobs stay.
 	 */
-	private int clearDrops(ServerLevel level, int ox, int oz) {
-		AABB box = new AABB(minX + ox, minY, minZ + oz, maxX + 1 + ox, maxY + 1, maxZ + 1 + oz);
+	private int clearDrops(ServerLevel level, int[] wb) {
+		AABB box = new AABB(wb[0], minY, wb[1], wb[2] + 1, maxY + 1, wb[3] + 1);
 		int n = 0;
 		for (ItemEntity e : level.getEntitiesOfClass(ItemEntity.class, box)) {
 			e.discard();

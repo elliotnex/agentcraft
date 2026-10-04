@@ -48,9 +48,9 @@ public final class Foreman {
 		return dev.agentcraft.layout.Anchors.of(Hubs.active().id());
 	}
 
-	/** The layout of the studio at world x (the active hub's when x is in no hub's slot). */
-	public static dev.agentcraft.layout.Anchors.Layout layoutAt(double x) {
-		dev.agentcraft.layout.HubRegistry.Hub h = dev.agentcraft.layout.HubRegistry.at(x);
+	/** The layout of the studio at world (x, z) (the active hub's when that is on no hub's grounds). */
+	public static dev.agentcraft.layout.Anchors.Layout layoutAt(double x, double z) {
+		dev.agentcraft.layout.HubRegistry.Hub h = dev.agentcraft.layout.HubRegistry.at(x, z);
 		return h == null ? layout() : dev.agentcraft.layout.Anchors.of(h.id());
 	}
 

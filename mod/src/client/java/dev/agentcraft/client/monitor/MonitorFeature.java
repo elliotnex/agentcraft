@@ -171,7 +171,7 @@ public final class MonitorFeature {
 		}
 		// the layout of the studio this monitor stands in (cached positions are world positions, so a
 		// cache shared by every studio stays valid; it is cleared when any studio is rebuilt)
-		Anchors.Layout layout = dev.agentcraft.client.foreman.Foreman.layoutAt(be.getBlockPos().getX());
+		Anchors.Layout layout = dev.agentcraft.client.foreman.Foreman.layoutAt(be.getBlockPos().getX(), be.getBlockPos().getZ());
 		long rev = 0;
 		for (Anchors.Layout l : Anchors.all().values()) {
 			rev = rev * 31 + l.revision();

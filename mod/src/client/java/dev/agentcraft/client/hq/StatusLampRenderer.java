@@ -98,7 +98,7 @@ public class StatusLampRenderer extends StationRenderer<StatusLampBlockEntity, S
 			&& be.getLevel() != null) {
 			// the open face towards the middle of the HQ (a lamp set into an outer wall also has air outside)
 			double best = Double.MAX_VALUE;
-			Anchors.Bounds b = dev.agentcraft.client.foreman.Foreman.layoutAt(be.getBlockPos().getX()).bounds();
+			Anchors.Bounds b = dev.agentcraft.client.foreman.Foreman.layoutAt(be.getBlockPos().getX(), be.getBlockPos().getZ()).bounds();
 			double cx = b == null ? 0 : (b.minX() + b.maxX()) / 2.0;
 			double cz = b == null ? 0 : (b.minZ() + b.maxZ()) / 2.0;
 			for (Direction d : Direction.Plane.HORIZONTAL) {

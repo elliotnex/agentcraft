@@ -182,7 +182,7 @@ public final class StudioHqBuilder implements HqBuilder {
 		p.settleGrass();
 		long tPlan = System.nanoTime() - tPlan0;
 		BlockState[] previous = PlanStore.load(level.getServer(), a.hub(), ID, SITE, p.size());
-		Plan.Stats st = p.apply(level, previous, options.force(), a.offsetX(), a.offsetZ());
+		Plan.Stats st = p.apply(level, previous, options.force(), a.placement());
 		PlanStore.save(level.getServer(), a.hub(), ID, SITE, p.cells());
 		a.bounds(-HX + 1, FLOOR, HZN + 1, HX - 1, FLOOR + 16, AZ + 8);
 		a.spot(AnchorNames.ENTRANCE, AX, FEET, AZ + 7, 180);
