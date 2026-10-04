@@ -15,7 +15,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.server.MinecraftServer;
@@ -30,6 +32,11 @@ import org.jspecify.annotations.Nullable;
  * world starts, so the layout survives restarts without rebuilding. Readers on any thread get an
  * immutable snapshot ({@link #current()}); the client (same JVM in singleplayer) reads it directly.
  * Listeners are told about every new layout (on the thread that published it).
+ *
+ * <p>Every hub ({@link HubRegistry}) has its own layout: {@link #of(String)}. The main hub's is
+ * {@link #current()} and keeps the original file name; another hub's is saved as
+ * {@code agentcraft-anchors-<hub>.json}. Plain {@link #addListener} listeners hear the main hub only;
+ * {@link #addHubListener} hears every hub.
  */
 public final class Anchors {
 	public static final String FILE = "agentcraft-anchors.json";
@@ -56,7 +63,9 @@ public final class Anchors {
 	}
 
 	private static volatile Layout current = Layout.EMPTY;
+	private static final Map<String, Layout> HUB_LAYOUTS = new ConcurrentHashMap<>();
 	private static final List<Consumer<Layout>> LISTENERS = new CopyOnWriteArrayList<>();
+	private static final List<BiConsumer<String, Layout>> HUB_LISTENERS = new CopyOnWriteArrayList<>();
 
 	private Anchors() {
 	}
@@ -64,10 +73,45 @@ public final class Anchors {
 	public static void init() {
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			if (HqWorld.isHq(server)) {
-				load(server);
+				load(server, HubRegistry.MAIN);
+				for (HubRegistry.Hub h : HubRegistry.all()) {
+					if (!h.isMain()) {
+						load(server, h.id());
+					}
+				}
 			}
 		});
-		ServerLifecycleEvents.SERVER_STOPPED.register(server -> set(Layout.EMPTY));
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+			for (String hub : List.copyOf(HUB_LAYOUTS.keySet())) {
+				set(hub, Layout.EMPTY);
+			}
+			HUB_LAYOUTS.clear();
+			set(HubRegistry.MAIN, Layout.EMPTY);
+		});
+	}
+
+	/** The layout of {@code hub} (EMPTY until its studio is built). */
+	public static Layout of(String hub) {
+		return HubRegistry.MAIN.equals(hub) ? current : HUB_LAYOUTS.getOrDefault(hub, Layout.EMPTY);
+	}
+
+	/** Every hub that has a layout, with it (main first). */
+	public static Map<String, Layout> all() {
+		Map<String, Layout> m = new LinkedHashMap<>();
+		if (!current.isEmpty()) {
+			m.put(HubRegistry.MAIN, current);
+		}
+		for (Map.Entry<String, Layout> e : HUB_LAYOUTS.entrySet()) {
+			if (!e.getValue().isEmpty()) {
+				m.put(e.getKey(), e.getValue());
+			}
+		}
+		return m;
+	}
+
+	/** Hears every hub's new layouts: (hub id, layout). */
+	public static void addHubListener(BiConsumer<String, Layout> listener) {
+		HUB_LISTENERS.add(listener);
 	}
 
 	public static Layout current() {
@@ -83,39 +127,61 @@ public final class Anchors {
 	}
 
 	public static Builder builder(String layoutName) {
-		return new Builder(layoutName);
+		return new Builder(layoutName, HubRegistry.MAIN, 0, 0);
 	}
 
-	/** Make {@code layout} current and save it with the world. Call on the server thread. */
+	/** A builder for {@code hub}'s studio: positions given in studio coordinates are moved to the hub's origin. */
+	public static Builder builder(String layoutName, HubRegistry.Hub hub) {
+		return new Builder(layoutName, hub.id(), hub.originX(), 0);
+	}
+
+	/** Make {@code layout} the main hub's current layout and save it with the world. Call on the server thread. */
 	public static void publish(MinecraftServer server, Layout layout) {
-		Layout withRev = new Layout(layout.name(), current.revision() + 1, layout.bounds(), layout.anchors());
-		set(withRev);
-		save(server, withRev);
-		AgentCraft.LOGGER.info("Published layout '{}' rev {} with {} anchors", withRev.name(), withRev.revision(), withRev.anchors().size());
+		publish(server, HubRegistry.MAIN, layout);
 	}
 
-	private static void set(Layout layout) {
-		current = layout;
-		for (Consumer<Layout> l : LISTENERS) {
+	/** Make {@code layout} {@code hub}'s layout and save it with the world. Call on the server thread. */
+	public static void publish(MinecraftServer server, String hub, Layout layout) {
+		Layout withRev = new Layout(layout.name(), of(hub).revision() + 1, layout.bounds(), layout.anchors());
+		set(hub, withRev);
+		save(server, hub, withRev);
+		AgentCraft.LOGGER.info("Published layout '{}' of hub '{}' rev {} with {} anchors", withRev.name(), hub, withRev.revision(),
+			withRev.anchors().size());
+	}
+
+	private static void set(String hub, Layout layout) {
+		if (HubRegistry.MAIN.equals(hub)) {
+			current = layout;
+			for (Consumer<Layout> l : LISTENERS) {
+				try {
+					l.accept(layout);
+				} catch (Throwable t) {
+					AgentCraft.LOGGER.warn("Anchor listener failed", t);
+				}
+			}
+		} else {
+			HUB_LAYOUTS.put(hub, layout);
+		}
+		for (BiConsumer<String, Layout> l : HUB_LISTENERS) {
 			try {
-				l.accept(layout);
+				l.accept(hub, layout);
 			} catch (Throwable t) {
-				AgentCraft.LOGGER.warn("Anchor listener failed", t);
+				AgentCraft.LOGGER.warn("Hub anchor listener failed", t);
 			}
 		}
 	}
 
 	// ------------------------------------------------------------------ persistence
 
-	private static Path file(MinecraftServer server) {
-		return server.getWorldPath(LevelResource.ROOT).resolve(FILE);
+	private static Path file(MinecraftServer server, String hub) {
+		return server.getWorldPath(LevelResource.ROOT).resolve(HubRegistry.MAIN.equals(hub) ? FILE : "agentcraft-anchors-" + hub + ".json");
 	}
 
-	private static void save(MinecraftServer server, Layout layout) {
+	private static void save(MinecraftServer server, String hub, Layout layout) {
 		JsonObject root = toJson(layout);
-		Path f = file(server);
+		Path f = file(server, hub);
 		try {
-			Path tmp = f.resolveSibling(FILE + ".tmp");
+			Path tmp = f.resolveSibling(f.getFileName() + ".tmp");
 			Files.writeString(tmp, GSON.toJson(root), StandardCharsets.UTF_8);
 			Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException e) {
@@ -123,20 +189,20 @@ public final class Anchors {
 		}
 	}
 
-	private static void load(MinecraftServer server) {
-		Path f = file(server);
+	private static void load(MinecraftServer server, String hub) {
+		Path f = file(server, hub);
 		if (!Files.exists(f)) {
-			AgentCraft.LOGGER.info("No {} yet (run /agentcraft hq to build the HQ and its anchors)", FILE);
-			set(Layout.EMPTY);
+			AgentCraft.LOGGER.info("No {} yet (run /agentcraft hq to build the HQ and its anchors)", f.getFileName());
+			set(hub, Layout.EMPTY);
 			return;
 		}
 		try {
 			Layout layout = fromJson(JsonParser.parseString(Files.readString(f, StandardCharsets.UTF_8)).getAsJsonObject());
-			set(layout);
-			AgentCraft.LOGGER.info("Loaded layout '{}' rev {} ({} anchors)", layout.name(), layout.revision(), layout.anchors().size());
+			set(hub, layout);
+			AgentCraft.LOGGER.info("Loaded layout '{}' of hub '{}' rev {} ({} anchors)", layout.name(), hub, layout.revision(), layout.anchors().size());
 		} catch (Exception e) {
 			AgentCraft.LOGGER.warn("Could not read {}; run /agentcraft hq again", f, e);
-			set(Layout.EMPTY);
+			set(hub, Layout.EMPTY);
 		}
 	}
 
@@ -197,17 +263,39 @@ public final class Anchors {
 	// ------------------------------------------------------------------ builder
 
 	/** Collects anchors while an HQ builder runs. Later puts with the same name replace earlier ones. */
+	/**
+	 * Collects a layout. Builders work in studio coordinates; {@code offsetX/offsetZ} (the hub's
+	 * origin) are added to every anchor and to the bounds.
+	 */
 	public static final class Builder {
 		private final String name;
+		private final String hub;
+		private final int offsetX;
+		private final int offsetZ;
 		private final Map<String, Anchor> anchors = new LinkedHashMap<>();
 		private @Nullable Bounds bounds;
 
-		private Builder(String name) {
+		private Builder(String name, String hub, int offsetX, int offsetZ) {
 			this.name = name;
+			this.hub = hub;
+			this.offsetX = offsetX;
+			this.offsetZ = offsetZ;
+		}
+
+		public String hub() {
+			return hub;
+		}
+
+		public int offsetX() {
+			return offsetX;
+		}
+
+		public int offsetZ() {
+			return offsetZ;
 		}
 
 		public Builder put(String anchorName, double x, double y, double z, float yaw, float pitch) {
-			anchors.put(anchorName, new Anchor(anchorName, x, y, z, yaw, pitch));
+			anchors.put(anchorName, new Anchor(anchorName, x + offsetX, y, z + offsetZ, yaw, pitch));
 			return this;
 		}
 
@@ -233,8 +321,8 @@ public final class Anchors {
 		}
 
 		public Builder bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-			this.bounds = new Bounds(Math.min(minX, maxX), Math.min(minY, maxY), Math.min(minZ, maxZ),
-				Math.max(minX, maxX), Math.max(minY, maxY), Math.max(minZ, maxZ));
+			this.bounds = new Bounds(Math.min(minX, maxX) + offsetX, Math.min(minY, maxY), Math.min(minZ, maxZ) + offsetZ,
+				Math.max(minX, maxX) + offsetX, Math.max(minY, maxY), Math.max(minZ, maxZ) + offsetZ);
 			return this;
 		}
 

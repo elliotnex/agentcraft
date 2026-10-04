@@ -179,9 +179,9 @@ public final class StudioHqBuilder implements HqBuilder {
 		cameras(a);
 		p.settleGrass();
 		long tPlan = System.nanoTime() - tPlan0;
-		BlockState[] previous = PlanStore.load(level.getServer(), ID, SITE, p.size());
-		Plan.Stats st = p.apply(level, previous, options.force());
-		PlanStore.save(level.getServer(), ID, SITE, p.cells());
+		BlockState[] previous = PlanStore.load(level.getServer(), a.hub(), ID, SITE, p.size());
+		Plan.Stats st = p.apply(level, previous, options.force(), a.offsetX(), a.offsetZ());
+		PlanStore.save(level.getServer(), a.hub(), ID, SITE, p.cells());
 		a.bounds(-HX + 1, FLOOR, HZN + 1, HX - 1, FLOOR + 16, AZ + 8);
 		a.spot(AnchorNames.ENTRANCE, AX, FEET, AZ + 7, 180);
 		a.put(AnchorNames.SPAWN, AX + 0.5, FEET, AZ + 7.5, 180, 0);

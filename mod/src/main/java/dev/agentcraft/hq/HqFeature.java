@@ -7,6 +7,7 @@ import dev.agentcraft.command.AgentCraftCommands;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.layout.HubRegistry;
 import dev.agentcraft.world.HqWorld;
 import java.util.Locale;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -52,6 +53,7 @@ public final class HqFeature {
 				}
 			}
 		});
+		HubCommands.register();
 		AgentCraftCommands.sub(root -> root.then(Commands.literal("hq")
 			.executes(ctx -> build(ctx, HqBuilders.defaultId(), false))
 			.then(Commands.literal("force").executes(ctx -> build(ctx, HqBuilders.defaultId(), true)))
@@ -98,16 +100,27 @@ public final class HqFeature {
 	}
 
 	public static Anchors.Layout buildAndPublish(ServerLevel level, HqBuilder builder, HqBuilder.Options options) {
+		return buildAndPublish(level, builder, options, HubRegistry.get(HubRegistry.MAIN));
+	}
+
+	/**
+	 * Builds {@code hub}'s studio at the hub's origin and publishes its layout. Only the main hub
+	 * moves the world spawn; only the default (studio) builder can build another hub.
+	 */
+	public static Anchors.Layout buildAndPublish(ServerLevel level, HqBuilder builder, HqBuilder.Options options, HubRegistry.Hub hub) {
 		long t0 = System.nanoTime();
+		if (!hub.isMain() && !builder.id().equals(HqBuilders.defaultId())) {
+			throw new IllegalArgumentException("only the '" + HqBuilders.defaultId() + "' builder can build another hub's studio");
+		}
 		// another builder rewrites the same ground without a record: the studio's memory of its last
 		// build no longer describes the world
-		PlanStore.invalidateUnless(level.getServer(), builder.id());
-		Anchors.Builder anchors = Anchors.builder(builder.id());
+		PlanStore.invalidateUnless(level.getServer(), hub.id(), builder.id());
+		Anchors.Builder anchors = hub.isMain() ? Anchors.builder(builder.id()) : Anchors.builder(builder.id(), hub);
 		lastReport = builder.build(level, anchors, options);
 		Anchors.Layout layout = anchors.build();
-		Anchors.publish(level.getServer(), layout);
+		Anchors.publish(level.getServer(), hub.id(), layout);
 		Anchor spawn = layout.get(AnchorNames.SPAWN);
-		if (spawn != null) {
+		if (spawn != null && hub.isMain()) {
 			level.getServer().getCommands().performPrefixedCommand(level.getServer().createCommandSourceStack().withSuppressedOutput(),
 				String.format(Locale.ROOT, "setworldspawn %d %d %d %.1f 0", (int) Math.floor(spawn.x()), (int) Math.floor(spawn.y()),
 					(int) Math.floor(spawn.z()), spawn.yaw()));

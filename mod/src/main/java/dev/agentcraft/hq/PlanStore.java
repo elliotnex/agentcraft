@@ -32,13 +32,14 @@ final class PlanStore {
 	private PlanStore() {
 	}
 
-	private static Path file(MinecraftServer server) {
-		return server.getWorldPath(LevelResource.ROOT).resolve(FILE);
+	private static Path file(MinecraftServer server, String hub) {
+		return server.getWorldPath(LevelResource.ROOT).resolve(dev.agentcraft.layout.HubRegistry.MAIN.equals(hub) ? FILE
+			: "agentcraft-hq-plan-" + hub + ".dat");
 	}
 
 	/** The previous plan of {@code builder} for exactly this box, or null. */
-	static BlockState @Nullable [] load(MinecraftServer server, String builder, int[] box, int cells) {
-		Path f = file(server);
+	static BlockState @Nullable [] load(MinecraftServer server, String hub, String builder, int[] box, int cells) {
+		Path f = file(server, hub);
 		if (!Files.exists(f)) {
 			return null;
 		}
@@ -67,7 +68,7 @@ final class PlanStore {
 		}
 	}
 
-	static void save(MinecraftServer server, String builder, int[] box, BlockState[] cells) {
+	static void save(MinecraftServer server, String hub, String builder, int[] box, BlockState[] cells) {
 		Map<BlockState, Integer> ids = new HashMap<>();
 		ListTag palette = new ListTag();
 		int[] idx = new int[cells.length];
@@ -85,9 +86,9 @@ final class PlanStore {
 		root.putIntArray("box", box);
 		root.put("palette", palette);
 		root.put("cells", new IntArrayTag(idx));
-		Path f = file(server);
+		Path f = file(server, hub);
 		try {
-			Path tmp = f.resolveSibling(FILE + ".tmp");
+			Path tmp = f.resolveSibling(f.getFileName() + ".tmp");
 			NbtIo.writeCompressed(root, tmp);
 			Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException e) {
@@ -96,8 +97,8 @@ final class PlanStore {
 	}
 
 	/** Forget the stored plan unless it belongs to {@code builder} (another builder is about to rewrite the site). */
-	static void invalidateUnless(MinecraftServer server, String builder) {
-		Path f = file(server);
+	static void invalidateUnless(MinecraftServer server, String hub, String builder) {
+		Path f = file(server, hub);
 		if (!Files.exists(f)) {
 			return;
 		}
@@ -116,7 +117,7 @@ final class PlanStore {
 		}
 	}
 
-	static boolean exists(MinecraftServer server) {
-		return Files.exists(file(server));
+	static boolean exists(MinecraftServer server, String hub) {
+		return Files.exists(file(server, hub));
 	}
 }

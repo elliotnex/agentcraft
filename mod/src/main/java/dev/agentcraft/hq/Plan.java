@@ -292,6 +292,14 @@ final class Plan {
 	 * @param force set every cell to the plan even where the player changed it.
 	 */
 	Stats apply(ServerLevel level, BlockState @Nullable [] previous, boolean force) {
+		return apply(level, previous, force, 0, 0);
+	}
+
+	/**
+	 * Applies the plan with its studio coordinates moved by ({@code ox}, 0, {@code oz}) in the world:
+	 * a hub's studio is the same plan built at the hub's origin.
+	 */
+	Stats apply(ServerLevel level, BlockState @Nullable [] previous, boolean force, int ox, int oz) {
 		long t0 = System.nanoTime();
 		int changed = 0;
 		int kept = 0;
@@ -302,17 +310,18 @@ final class Plan {
 		List<BlockPos> deferred = new ArrayList<>();
 		boolean guard = previous != null && previous.length == cells.length && !force;
 		BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
-			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+		for (int cx = (minX + ox) >> 4; cx <= (maxX + ox) >> 4; cx++) {
+			for (int cz = (minZ + oz) >> 4; cz <= (maxZ + oz) >> 4; cz++) {
 				LevelChunk chunk = level.getChunk(cx, cz);
-				int x0 = Math.max(minX, cx << 4);
-				int x1 = Math.min(maxX, (cx << 4) + 15);
-				int z0 = Math.max(minZ, cz << 4);
-				int z1 = Math.min(maxZ, (cz << 4) + 15);
+				int x0 = Math.max(minX + ox, cx << 4);
+				int x1 = Math.min(maxX + ox, (cx << 4) + 15);
+				int z0 = Math.max(minZ + oz, cz << 4);
+				int z1 = Math.min(maxZ + oz, (cz << 4) + 15);
 				for (int y = minY; y <= maxY; y++) {
 					for (int z = z0; z <= z1; z++) {
 						for (int x = x0; x <= x1; x++) {
-							int i = index(x, y, z);
+							// x, z: world; the plan cell is (x - ox, y, z - oz)
+							int i = index(x - ox, y, z - oz);
 							BlockState want = cells[i];
 							m.set(x, y, z);
 							BlockState cur = chunk.getBlockState(m);
@@ -358,7 +367,7 @@ final class Plan {
 		int connected = 0;
 		for (BlockPos p : deferred) {
 			BlockState cur = level.getBlockState(p);
-			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX(), p.getY(), p.getZ())]), level, p);
+			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX() - ox, p.getY(), p.getZ() - oz)]), level, p);
 			if (cur != want) {
 				note(sample, p, cur, want);
 				level.setBlock(p, want, FLAGS);
@@ -371,14 +380,14 @@ final class Plan {
 			if (in(p.getX(), p.getY(), p.getZ()) && keptCells.get(index(p.getX(), p.getY(), p.getZ()))) {
 				continue;
 			}
-			if (level.getBlockEntity(p) instanceof StationBlockEntity be) {
+			if (level.getBlockEntity(p.offset(ox, 0, oz)) instanceof StationBlockEntity be) {
 				if (!be.binding().equals(e.getValue())) {
 					bound++;
 				}
 				be.setBinding(e.getValue());
 			}
 		}
-		int items = clearDrops(level);
+		int items = clearDrops(level, ox, oz);
 		return new Stats(cells.length, changed, connected, bound, kept, foreign, items, (System.nanoTime() - t0) / 1000, sample, keptSample);
 	}
 
@@ -393,8 +402,8 @@ final class Plan {
 	 * Removes dropped items and experience orbs inside the box (a switch from another builder can
 	 * leave items behind, e.g. carpets that lost their floor). Players, agents and other mobs stay.
 	 */
-	private int clearDrops(ServerLevel level) {
-		AABB box = new AABB(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1);
+	private int clearDrops(ServerLevel level, int ox, int oz) {
+		AABB box = new AABB(minX + ox, minY, minZ + oz, maxX + 1 + ox, maxY + 1, maxZ + 1 + oz);
 		int n = 0;
 		for (ItemEntity e : level.getEntitiesOfClass(ItemEntity.class, box)) {
 			e.discard();

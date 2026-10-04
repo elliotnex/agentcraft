@@ -7,6 +7,7 @@ import dev.agentcraft.command.AgentCraftCommands;
 import dev.agentcraft.entity.ModEntities;
 import dev.agentcraft.hq.HqFeature;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.layout.HubRegistry;
 import dev.agentcraft.world.HqWorld;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.resources.Identifier;
@@ -29,6 +30,7 @@ public class AgentCraft implements ModInitializer {
 		ModItems.init();
 		ModEntities.init();
 		HqWorld.init();
+		HubRegistry.init();   // before Anchors: the hub list says which layouts to load
 		Anchors.init();
 		AgentCraftCommands.init();
 		HqFeature.init();

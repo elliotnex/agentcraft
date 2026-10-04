@@ -10,8 +10,11 @@ import dev.agentcraft.client.foreman.Protocol.ForemanStatus;
 import dev.agentcraft.client.foreman.Protocol.Goal;
 import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.TaskStatus;
+import dev.agentcraft.layout.HubRegistry;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.Minecraft;
 
 /**
  * Wires the Foreman link: creates the state model and the WebSocket client at startup, starts it
@@ -38,6 +41,7 @@ public final class ForemanFeature {
 		Hubs.add(Hub.MAIN, "Main", port, enabled);
 		ClientLifecycleEvents.CLIENT_STARTED.register(mc -> Hubs.startAll());
 		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> Hubs.stopAll());
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> followWorldHubs(mc, enabled));
 
 		DevBridge.addStateContributor((mc, o) -> o.add("foreman", stateJson()));
 		DevBridge.register("dev.foreman", 10_000,
@@ -206,6 +210,34 @@ public final class ForemanFeature {
 		o.addProperty("applied", st.inject(type, msg));
 		o.add("message", msg);
 		return o;
+	}
+
+	private static long seenHubsRevision = -1;
+	private static int hubTick;
+
+	/**
+	 * Keeps the links in step with the world's hubs ({@link HubRegistry}: a new hub gets its link) and
+	 * makes the hub the player stands in the active one. Client thread, every tick (cheap; the position
+	 * check runs twice a second).
+	 */
+	private static void followWorldHubs(Minecraft mc, boolean enabled) {
+		long rev = HubRegistry.revision();
+		if (rev != seenHubsRevision) {
+			seenHubsRevision = rev;
+			for (HubRegistry.Hub h : HubRegistry.all()) {
+				if (!h.isMain() && Hubs.get(h.id()) == null) {
+					Hubs.add(h.id(), h.name(), h.port(), enabled);
+				}
+			}
+		}
+		if (mc.player == null || ++hubTick % 10 != 0) {
+			return;
+		}
+		HubRegistry.Hub here = HubRegistry.at(mc.player.getX());
+		Hub hub = here == null ? null : Hubs.get(here.id());
+		if (hub != null) {
+			Hubs.setActive(hub);
+		}
 	}
 
 	/** Every hub's link at a glance (dev.hubs). Client thread. */
