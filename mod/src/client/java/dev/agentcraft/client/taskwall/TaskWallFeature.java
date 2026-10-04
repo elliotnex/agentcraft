@@ -96,6 +96,10 @@ public final class TaskWallFeature {
 		LevelRenderEvents.BEFORE_BLOCK_OUTLINE.register((ctx, outline) -> !cardUnderCrosshair(outline.pos()));
 		StationInteractions.onUse(ModBlocks.TASK_BOARD, (player, pos, state, be) -> {
 			Minecraft mc = Minecraft.getInstance();
+			if (HubWall.BINDING.equals(be.binding())) {
+				mc.gui.setScreen(new dev.agentcraft.client.hubs.HubsScreen());
+				return;
+			}
 			HitResult hr = mc.hitResult;
 			Vec3 hit = hr instanceof BlockHitResult bh && hr.getType() == HitResult.Type.BLOCK ? bh.getLocation() : Vec3.atCenterOf(pos);
 			String id = taskAt(pos, state, hit);

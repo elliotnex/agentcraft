@@ -393,8 +393,11 @@ final class TaskBoard {
 	 * Re-lay out when the tasks or the size changed, refresh card contents when only agents changed.
 	 * Returns true when anything was rebuilt.
 	 */
+	/** A fixed pixel density for this board (the hub wall reads from across the courtyard); 0 = {@link #density}. */
+	int forcedPpb;
+
 	boolean sync(@Nullable ForemanState s, int panelW, int panelH, long taskSeq, long agentSeq, long now) {
-		int ppb = density(panelW, panelH);
+		int ppb = forcedPpb > 0 ? forcedPpb : density(panelW, panelH);
 		boolean resized = ppb != this.ppb || panelW != this.panelW || panelH != this.panelH;
 		if (!resized && taskSeq == this.taskSeq && agentSeq == this.agentSeq && everLaidOut) {
 			return false;

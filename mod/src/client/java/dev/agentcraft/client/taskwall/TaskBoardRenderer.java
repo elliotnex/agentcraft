@@ -64,6 +64,8 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		boolean stale;
 		boolean noData;
 		String noDataText = "";
+		/** Bound to "hubs": the hub wall ({@link HubWall}) instead of the task kanban. */
+		boolean hubs;
 	}
 
 	private static final List<TaskBoard.Card> STATIC = new ArrayList<>();
@@ -93,7 +95,11 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		ForemanState fs = Foreman.state();
 		TaskBoard b = TaskWallFeature.board(be.getBlockPos());
 		b.lastUsedNanos = now;
-		if (b.sync(fs != null && fs.hasData() ? fs : null, s.panelWidth, s.panelHeight, TaskWallFeature.taskSeq(), TaskWallFeature.agentSeq(), now)) {
+		s.hubs = HubWall.BINDING.equals(be.binding());
+		b.forcedPpb = s.hubs ? HubWall.PPB : 0;
+		// the hub wall only borrows the board's geometry (no task cards)
+		ForemanState cards = s.hubs ? null : fs != null && fs.hasData() ? fs : null;
+		if (b.sync(cards, s.panelWidth, s.panelHeight, TaskWallFeature.taskSeq(), TaskWallFeature.agentSeq(), now)) {
 			DisplayStats.rebuilt(DisplayStats.Kind.BOARD);
 		}
 		b.step(now);
@@ -152,6 +158,13 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		toFace(ps, s.facing, LINEN_DEPTH, b.ppb);
 		ps.translate(0, -(s.panelHeight - 1) * b.ppb, 0);
 		int light = s.light;
+		if (s.hubs) {
+			drawTiled(ps, c, b, SURFACE, light);
+			HubWall.draw(ps, c, b, light);
+			ps.popPose();
+			DisplayStats.add(DisplayStats.Kind.BOARD, System.nanoTime() - t0);
+			return;
+		}
 		int headInk = UiStyle.color("paper.text", 0xFF1F1E1D);
 		int muted = UiStyle.color("paper.muted", 0xFF655E55);
 		// the board's own walnut surface, evenly lit (the block face is shaded by its facing; the cards are not)
