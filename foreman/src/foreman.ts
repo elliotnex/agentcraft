@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { MessageBus } from './bus.js';
-import { loadCast, type CastMember } from './cast.js';
+import { loadCast, SCOUT, type CastMember } from './cast.js';
 import type { Config } from './config.js';
 import { FOREMAN_VERSION } from './config.js';
 import { consoleLogger, type Ctx, type Logger } from './context.js';
@@ -19,6 +19,8 @@ import type {
   ForemanStatus,
   Goal,
   GoalStatus,
+  GoalMode,
+  BackendName,
   LogEntry,
   LogKind,
   Outbound,
@@ -32,7 +34,7 @@ import { setUserName, userName } from './user.js';
 import { truncate } from './util/text.js';
 
 export interface Backend {
-  readonly name: 'sim' | 'claude';
+  readonly name: BackendName;
   /** Called once after the core is ready (and after restart: resume work). */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -99,7 +101,8 @@ export class Foreman {
       opts.notifier ??
       new Notifier({ enabled: opts.config.notify, silent: opts.config.toastSilent, log: this.log, now });
     const { cast, source } = loadCast(opts.config.projectRoot);
-    this.cast = cast;
+    // the open backend is the freelancer alone
+    this.cast = opts.config.backend === 'open' ? [SCOUT] : cast;
     this.log.debug(`cast from ${source}`);
     setUserName(opts.config.userName);
     this.status = { version: FOREMAN_VERSION, backend: opts.config.backend, auth: opts.config.backend === 'sim' ? 'ok' : 'unknown', userName: userName(), profile: opts.config.profile };
@@ -144,7 +147,7 @@ export class Foreman {
           activity: c.role === 'lead' ? 'ready for a goal' : 'off shift',
           station: 'lounge',
           paused: false,
-          active: c.role === 'lead',
+          active: c.role === 'lead' || c.id === SCOUT.id,
         };
         if (c.accent) a.accent = c.accent;
         agents.push(a);
@@ -272,10 +275,12 @@ export class Foreman {
     return this.store.data.goals.find((g) => g.id === id);
   }
 
-  createGoal(text: string, repoId?: string): Goal {
+  createGoal(text: string, repoId?: string, extra: { model?: string; mode?: GoalMode } = {}): Goal {
     const now = this.ctx.now();
     const goal: Goal = { id: this.store.nextId('g'), text: text.trim(), progress: 0, status: 'planning', createdAt: now, updatedAt: now };
     if (repoId) goal.repoId = repoId;
+    if (extra.model) goal.model = extra.model;
+    if (extra.mode) goal.mode = extra.mode;
     this.store.data.goals.push(goal);
     this.store.markDirty();
     this.emit({ type: 'goal.upsert', goal: { ...goal } });
@@ -504,7 +509,7 @@ export class Foreman {
         reply(this.snapshot());
         return undefined;
       case 'goal.submit':
-        return { goalId: (await this.submitGoal(msg.text, msg.repoId)).id };
+        return { goalId: (await this.submitGoal(msg.text, msg.repoId, { ...(msg.model ? { model: msg.model } : {}), ...(msg.mode ? { mode: msg.mode } : {}) })).id };
       case 'user.message': {
         const { to, text } = this.routeUserMessage(msg.to, msg.text);
         this.bus.send('user', to, text);
@@ -538,12 +543,12 @@ export class Foreman {
     }
   }
 
-  async submitGoal(text: string, repoId?: string): Promise<Goal> {
+  async submitGoal(text: string, repoId?: string, extra: { model?: string; mode?: GoalMode } = {}): Promise<Goal> {
     const repo = repoId ? this.repos.get(repoId) : this.repos.defaultRepo();
     if (repoId && !repo) throw new ClientError(`no repo "${repoId}"`);
     if (!repo) throw new ClientError('no repo connected yet — add one with /repo add <path>');
     if (!this.backend) throw new ClientError('no backend running');
-    const goal = this.createGoal(text, repo.id);
+    const goal = this.createGoal(text, repo.id, extra);
     await this.backend.submitGoal(goal);
     return goal;
   }

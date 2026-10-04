@@ -15,6 +15,9 @@ export interface CastMember {
 }
 
 export const LEAD_ID = 'marlow';
+
+/** The freelancer: the open backend's only agent, at the plaza terminal (any model). */
+export const SCOUT: CastMember = { id: 'scout', name: 'Scout', role: 'worker', title: 'Freelancer', color: '#7E6BC4', accent: '#F4EFE6', description: 'One-off tasks and questions, on whatever model you pick.' };
 export const WORKER_IDS = ['juniper', 'kit', 'wren', 'rowan', 'tove'] as const;
 
 const PLACEHOLDER: CastMember[] = [

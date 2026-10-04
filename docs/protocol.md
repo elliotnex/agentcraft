@@ -26,7 +26,7 @@
 - <a id="feedkind"></a>**FeedKind**: `goal`, `plan`, `task`, `message`, `decision`, `merge`, `ci`, `memory`, `system`, `error`, `user`
 - <a id="notifylevel"></a>**NotifyLevel**: `info`, `warn`, `need_user`
 - <a id="worktreestatus"></a>**WorktreeStatus**: `active`, `merged`, `abandoned`
-- <a id="backendname"></a>**BackendName**: `sim`, `claude`
+- <a id="backendname"></a>**BackendName**: `sim`, `claude`, `open` - open: the freelancer, one agent on any OpenAI-compatible model (OpenRouter, Ollama, LM Studio...)
 - <a id="authstatus"></a>**AuthStatus**: `ok`, `failed`, `unknown`, `checking` - `failed` must be shown loudly (in-world banner): the claude backend cannot run.
 
 Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; permission decisions use `Allow once`, `Always allow for this agent`, `Deny`. Question decisions use agent-supplied options (may be empty: free text).
@@ -158,6 +158,8 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `progress` | number | yes |  |
 | `status` | `planning` \| `active` \| `done` \| `failed` \| `cancelled` | yes | planning (lead is planning) -> active -> done (every non-cancelled task merged/done); cancelled: every task was cancelled or rejected (back to active if the lead adds a task); failed: planning failed |
 | `repoId` | string | no |  |
+| `model` | string | no | open: the model this goal runs on (e.g. "openai/gpt-5") |
+| `mode` | `task` \| `ask` | no | open: task (changes in a worktree, ends in a merge decision) or ask (a question, read-only) |
 | `createdAt` | integer | yes | epoch milliseconds |
 | `updatedAt` | integer | yes | epoch milliseconds |
 
@@ -176,13 +178,14 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | field | type | required | notes |
 | --- | --- | --- | --- |
 | `version` | string | yes |  |
-| `backend` | [BackendName](#backendname) | yes |  |
+| `backend` | [BackendName](#backendname) | yes | open: the freelancer, one agent on any OpenAI-compatible model (OpenRouter, Ollama, LM Studio...) |
 | `auth` | [AuthStatus](#authstatus) | yes | `failed` must be shown loudly (in-world banner): the claude backend cannot run. |
 | `message` | string | no | human-readable backend/auth status for the banner |
 | `account` | string | no | e.g. organization / plan when auth ok |
 | `speed` | number | no | sim: speed multiplier |
 | `showcase` | boolean | no | sim: holding a static showcase state (`--showcase` or `--showcase late`) |
-| `costUsd` | number | no | claude: estimated spend of this profile (sum over all sessions, survives restarts) |
+| `costUsd` | number | no | claude: estimated spend of this profile (sum over all sessions, survives restarts); open: spend the provider reported |
+| `model` | string | no | open: the model the next goal runs on unless it names one |
 | `userName` | string | no | the person the team works for, as the agents address them (UI: "<name> answered") |
 | `autoApprove` | `off` \| `worktree` \| `network` \| `all` | no | claude: permission prompts the Foreman answers itself (config claude.autoApprove) |
 | `profile` | string | no | the state profile this Foreman runs (its project); a hub checks it reached the Foreman it expects |
@@ -891,6 +894,8 @@ New goal for the lead (console: plain text).
 | `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
 | `text` | string | yes |  |
 | `repoId` | string | no | defaults to the only/most recently added repo |
+| `model` | string | no | open backend: run on this model (and make it the default) |
+| `mode` | `task` \| `ask` | no | open backend: task (default) or ask (a question; no file changes) |
 
 ```json
 {

@@ -46,6 +46,22 @@ export interface ClaudeConfig {
   autoApprove: AutoApprove;
 }
 
+/** The open backend: the freelancer on any OpenAI-compatible endpoint. */
+export interface OpenConfig {
+  /** chat-completions base URL: OpenRouter (default), http://localhost:11434/v1 (Ollama), http://localhost:1234/v1 (LM Studio)... */
+  baseUrl: string;
+  /** environment variable holding the API key (never stored in config.json); empty for local servers */
+  apiKeyEnv: string;
+  /** the model when a goal names none */
+  model: string;
+  /** model calls per task before the freelancer must stop */
+  maxSteps: number;
+  ciCommand?: string;
+  autoApprove: AutoApprove;
+}
+
+export const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+
 export type ShowcaseCheckpoint = 'showcase' | 'showcase-late';
 
 export interface SimConfig {
@@ -89,6 +105,7 @@ export interface Config {
   signMerges: boolean;
   claude: ClaudeConfig;
   sim: SimConfig;
+  open: OpenConfig;
 }
 
 type Flags = Record<string, string | boolean>;
@@ -172,7 +189,7 @@ export const KNOWN_FLAGS = new Set([
   'home', 'backend', 'profile', 'user-name', 'use-claude-login', 'repo', 'workers', 'model', 'port', 'goal', 'autostart', 'reset', 'notify',
   'toast-silent', 'debug', 'quiet', 'allow-browser-origins', 'repo-poll-ms', 'merge-style', 'sign-merges',
   'lead-model', 'worker-model', 'effort', 'lead-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
-  'max-concurrent', 'ci', 'max-budget', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
+  'max-concurrent', 'ci', 'max-budget', 'base-url', 'max-steps', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
   'ambient', 'account-label', 'auto-approve',
 ]);
 
@@ -196,10 +213,11 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const file = readJson<Record<string, unknown>>(path.join(home, 'config.json')) ?? {};
   const fileClaude = (file.claude ?? {}) as Record<string, unknown>;
   const fileSim = (file.sim ?? {}) as Record<string, unknown>;
+  const fileOpen = (file.open ?? {}) as Record<string, unknown>;
   const pick = (k: string, envKey?: string): unknown => flags[k] ?? (envKey ? env[envKey] : undefined) ?? file[k];
 
   const backendRaw = String(pick('backend', 'AGENTCRAFT_BACKEND') ?? 'claude');
-  if (backendRaw !== 'sim' && backendRaw !== 'claude') throw new Error(`unknown backend "${backendRaw}" (use sim or claude)`);
+  if (backendRaw !== 'sim' && backendRaw !== 'claude' && backendRaw !== 'open') throw new Error(`unknown backend "${backendRaw}" (use sim, claude or open)`);
   const backend = backendRaw as BackendName;
   const profile = str(pick('profile', 'AGENTCRAFT_PROFILE')) ?? backend;
   if (!/^[a-zA-Z0-9_-]+$/.test(profile)) throw new Error(`bad profile name "${profile}"`);
@@ -231,7 +249,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     goal: str(flags.goal),
     autostart: bool(flags.autostart, false) || !!str(flags.goal),
     reset: bool(flags.reset, false),
-    notify: bool(pick('notify', 'AGENTCRAFT_NOTIFY'), backend === 'claude'),
+    notify: bool(pick('notify', 'AGENTCRAFT_NOTIFY'), backend !== 'sim'),
     toastSilent: bool(pick('toast-silent', 'AGENTCRAFT_TOAST_SILENT'), false),
     debug: bool(pick('debug', 'AGENTCRAFT_DEBUG'), false),
     quiet: bool(flags.quiet, false),
@@ -240,7 +258,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     repoPollMs: Math.max(500, num(pick('repo-poll-ms'), 10_000)),
     mergeStyle: mergeStyle(pick('merge-style', 'AGENTCRAFT_MERGE_STYLE')),
     // the sim answers merges unattended (screenshot QA, --auto-answer): never sign there
-    signMerges: bool(pick('sign-merges', 'AGENTCRAFT_SIGN_MERGES'), backend === 'claude'),
+    signMerges: bool(pick('sign-merges', 'AGENTCRAFT_SIGN_MERGES'), backend !== 'sim'),
     claude: {
       leadModel: str(flags['lead-model']) ?? model ?? str(env.AGENTCRAFT_LEAD_MODEL) ?? str(fileClaude.leadModel) ?? 'opus',
       workerModel: str(flags['worker-model']) ?? model ?? str(env.AGENTCRAFT_WORKER_MODEL) ?? str(fileClaude.workerModel) ?? 'sonnet',
@@ -266,6 +284,14 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       autoAnswer: bool(flags['auto-answer'] ?? fileSim.autoAnswer, false),
       ambient: bool(flags.ambient ?? fileSim.ambient, true),
     },
+    open: {
+      baseUrl: (str(flags['base-url']) ?? str(env.AGENTCRAFT_OPEN_BASE_URL) ?? str(fileOpen.baseUrl) ?? OPENROUTER_URL).replace(/\/+$/, ''),
+      apiKeyEnv: str(fileOpen.apiKeyEnv) ?? (typeof fileOpen.apiKeyEnv === 'string' ? '' : 'OPENROUTER_API_KEY'),
+      model: (backend === 'open' ? model : undefined) ?? str(env.AGENTCRAFT_OPEN_MODEL) ?? str(fileOpen.model) ?? 'openai/gpt-5-mini',
+      maxSteps: Math.max(5, num(flags['max-steps'] ?? fileOpen.maxSteps, 60)),
+      ciCommand: str(flags.ci) ?? str(fileOpen.ciCommand),
+      autoApprove: autoApprove(flags['auto-approve'] ?? env.AGENTCRAFT_AUTO_APPROVE ?? fileOpen.autoApprove ?? fileClaude.autoApprove),
+    },
   };
   if (cfg.sim.showcase) cfg.autostart = true;
   return cfg;
@@ -275,7 +301,7 @@ export const HELP = `AgentCraft Foreman ${FOREMAN_VERSION}
 
 usage: npm run start -- [options]
 
-  --backend sim|claude     agent backend (default: claude)
+  --backend sim|claude|open  agent backend (default: claude; open = the freelancer on any model)
   --repo <path>[,<path>]   register local git repo(s) at start (sim: defaults to a fresh sandbox/sim-demo)
   --goal "<text>"          submit a goal right away
   --port <n>               WebSocket port (default 7878, env AGENTCRAFT_PORT)

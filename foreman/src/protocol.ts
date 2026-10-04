@@ -61,7 +61,7 @@ export type NotifyLevel = z.infer<typeof NotifyLevel>;
 export const WorktreeStatus = z.enum(['active', 'merged', 'abandoned']);
 export type WorktreeStatus = z.infer<typeof WorktreeStatus>;
 
-export const BackendName = z.enum(['sim', 'claude']);
+export const BackendName = z.enum(['sim', 'claude', 'open']).describe('open: the freelancer, one agent on any OpenAI-compatible model (OpenRouter, Ollama, LM Studio...)');
 export type BackendName = z.infer<typeof BackendName>;
 
 export const AuthStatus = z
@@ -188,12 +188,17 @@ export const MemoryEntry = z.object({
 });
 export type MemoryEntry = z.infer<typeof MemoryEntry>;
 
+export const GoalMode = z.enum(['task', 'ask']);
+export type GoalMode = z.infer<typeof GoalMode>;
+
 export const Goal = z.object({
   id: Id.describe('e.g. "g1"'),
   text: z.string(),
   progress: z.number().min(0).max(1),
   status: GoalStatus.describe('planning (lead is planning) -> active -> done (every non-cancelled task merged/done); cancelled: every task was cancelled or rejected (back to active if the lead adds a task); failed: planning failed'),
   repoId: Id.optional(),
+  model: z.string().optional().describe('open: the model this goal runs on (e.g. "openai/gpt-5")'),
+  mode: GoalMode.optional().describe('open: task (changes in a worktree, ends in a merge decision) or ask (a question, read-only)'),
   createdAt: Ts,
   updatedAt: Ts,
 });
@@ -219,7 +224,8 @@ export const ForemanStatus = z.object({
   account: z.string().optional().describe('e.g. organization / plan when auth ok'),
   speed: z.number().optional().describe('sim: speed multiplier'),
   showcase: z.boolean().optional().describe('sim: holding a static showcase state (`--showcase` or `--showcase late`)'),
-  costUsd: z.number().optional().describe('claude: estimated spend of this profile (sum over all sessions, survives restarts)'),
+  costUsd: z.number().optional().describe('claude: estimated spend of this profile (sum over all sessions, survives restarts); open: spend the provider reported'),
+  model: z.string().optional().describe('open: the model the next goal runs on unless it names one'),
   userName: z.string().optional().describe('the person the team works for, as the agents address them (UI: "<name> answered")'),
   autoApprove: AutoApprove.optional().describe('claude: permission prompts the Foreman answers itself (config claude.autoApprove)'),
   profile: z.string().optional().describe('the state profile this Foreman runs (its project); a hub checks it reached the Foreman it expects'),
@@ -362,6 +368,8 @@ export const GoalSubmitMsg = z.object({
   ...envelope('goal.submit'),
   text: z.string().min(1),
   repoId: Id.optional().describe('defaults to the only/most recently added repo'),
+  model: z.string().optional().describe('open backend: run on this model (and make it the default)'),
+  mode: GoalMode.optional().describe('open backend: task (default) or ask (a question; no file changes)'),
 });
 export const UserMessageMsg = z.object({
   ...envelope('user.message'),
