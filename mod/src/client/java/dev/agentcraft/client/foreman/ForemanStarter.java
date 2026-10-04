@@ -33,6 +33,8 @@ final class ForemanStarter {
 	/** Wait this long after a start before trying again (a first launch installs npm packages). */
 	private static final long RETRY_MS = 120_000;
 	private static final Map<String, Long> STARTED = new HashMap<>();
+	/** Secrets a Foreman reads from its environment: taken fresh from the user's Windows settings at launch. */
+	private static final List<String> KEYS_FROM_USER_ENV = List.of("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN");
 
 	private ForemanStarter() {
 	}
@@ -75,6 +77,12 @@ final class ForemanStarter {
 		StringBuilder inner = new StringBuilder();
 		if (claudeConfigDir != null) {
 			inner.append("$env:CLAUDE_CONFIG_DIR=").append(psQuote(claudeConfigDir)).append("; ");
+		}
+		// the WMI host hands out the environment it started with, so keys set in Windows since then
+		// (setx) would be missing: read them from the user's settings at launch (never on the command line)
+		for (String key : KEYS_FROM_USER_ENV) {
+			inner.append("if (-not $env:").append(key).append(") { $env:").append(key).append("=[Environment]::GetEnvironmentVariable('").append(key)
+				.append("','User') }; ");
 		}
 		inner.append("& ").append(psQuote(launch.toString())).append(" -NoGame -Profile ").append(psQuote(profile)).append(" -Port ")
 			.append(hub.port());
